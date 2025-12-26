@@ -1,0 +1,42 @@
+# File: C:\Dev\CCP\SWEngineer\.gitignore
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.so
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# ---- Builds / Packaging ----
+build/
+dist/
+*.spec
+
+# ---- Project runtime/output ----
+logs/
+tmp/
+data/models/
+data/sessions/
+data/telemetry/
+
+# ---- IDE ----
+.vscode/
+.idea/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini

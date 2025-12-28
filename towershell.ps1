@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("help", "init", "install", "run", "verify", "test", "format", "lint", "build")]
+  [ValidateSet("help", "init", "install", "run", "verify", "test", "format", "lint", "build", "audit")]
   [string]$Action = "help",
 
   [Parameter(Position = 1)]
@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptRoot = $PSScriptRoot  # Always anchor to script location
 
 function Write-Section([string]$Text) {
   Write-Host ""
@@ -38,6 +38,13 @@ function Escape-Arg([string]$s) {
   if ($null -eq $s) { return '""' }
   if ($s -match '[\s"]') { return '"' + ($s -replace '"', '\"') + '"' }
   return $s
+}
+
+function Resolve-UnderRoot([string]$MaybePath) {
+  $root = Resolve-ProjectRoot
+  if ([string]::IsNullOrWhiteSpace($MaybePath)) { return $MaybePath }
+  if ([System.IO.Path]::IsPathRooted($MaybePath)) { return $MaybePath }
+  return (Join-Path $root $MaybePath)
 }
 
 function Invoke-Process(
@@ -152,7 +159,6 @@ function Pip-InstallBase {
   $req = Join-Path $root "requirements.txt"
   if (Test-Path $req) {
     Invoke-Process $venvPy @("-m","pip","install","-r","requirements.txt") $root 900
-    return
   }
 }
 
@@ -169,6 +175,7 @@ Usage:
   .\towershell.ps1 format
   .\towershell.ps1 lint
   .\towershell.ps1 build
+  .\towershell.ps1 audit
 "@ | Write-Host
 }
 
@@ -197,14 +204,17 @@ function Verify-Json([string]$Path) {
 
 function Action-Verify([string]$Path) {
   if ([string]::IsNullOrWhiteSpace($Path)) { throw "verify requires a file path" }
-  if (-not (Test-Path $Path)) { throw "File not found: $Path" }
 
-  $ext = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
-  Write-Section "Verifying $Path"
+  $root = Resolve-ProjectRoot
+  $resolved = Resolve-UnderRoot $Path
+  if (-not (Test-Path $resolved)) { throw "File not found: $resolved" }
+
+  $ext = [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()
+  Write-Section "Verifying $resolved"
 
   switch ($ext) {
-    ".py" { Verify-Python $Path; break }
-    ".json" { Verify-Json $Path; break }
+    ".py" { Verify-Python $resolved; break }
+    ".json" { Verify-Json $resolved; break }
     default { Write-Host "No verifier for $ext (OK)"; break }
   }
 
@@ -250,6 +260,16 @@ function Action-Build {
   Write-Host "Output: dist\LocalAISWE.exe"
 }
 
+function Action-Audit {
+  $root = Resolve-ProjectRoot
+  $audit = Join-Path $root "scripts\repo_audit.ps1"
+  if (-not (Test-Path $audit)) { throw "Missing: $audit" }
+  Write-Section "Repo audit"
+  & $audit -Root $root
+  if ($LASTEXITCODE -ne 0) { throw "Repo audit failed." }
+  Write-Host "OK"
+}
+
 switch ($Action) {
   "help"    { Action-Help; break }
   "init"    { Action-Init; break }
@@ -260,5 +280,6 @@ switch ($Action) {
   "format"  { Action-Format; break }
   "lint"    { Action-Lint; break }
   "build"   { Action-Build; break }
+  "audit"   { Action-Audit; break }
   default   { Action-Help; break }
 }

@@ -8,13 +8,13 @@ Run:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-# Ensure project root is importable when running this file directly.
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -23,8 +23,11 @@ from PySide6.QtCore import QDir, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFileSystemModel,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -44,6 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.paths import get_paths, is_probably_text_file, read_text, safe_relpath, write_text_atomic
+from app.engine.engine import Engine, EngineConfig
 
 
 @dataclass
@@ -53,12 +57,40 @@ class FileState:
     dirty: bool = False
 
 
+class SettingsDialog(QDialog):
+    def __init__(self, parent: QWidget, engine: Engine) -> None:
+        super().__init__(parent)
+        self.engine = engine
+        self.setWindowTitle("Settings")
+        self.setModal(True)
+        self.resize(520, 160)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        layout.addLayout(form)
+
+        self.host = QLineEdit(engine.config.ollama_host)
+        self.model = QLineEdit(engine.config.ollama_model)
+
+        form.addRow("Ollama host", self.host)
+        form.addRow("Ollama model", self.model)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self) -> tuple[str, str]:
+        return self.host.text().strip(), self.model.text().strip()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.paths = get_paths()
         self.root = self.paths.root
         self.state = FileState()
+        self.engine = Engine()
 
         self.setWindowTitle("LocalAISWE")
         self.resize(1400, 900)
@@ -150,7 +182,7 @@ class MainWindow(QMainWindow):
         input_row_layout.setSpacing(6)
 
         self.chat_input = QLineEdit()
-        self.chat_input.setPlaceholderText("Message the local engineer (stub for now)")
+        self.chat_input.setPlaceholderText("Message the local engineer")
         self.chat_send = QPushButton("Send")
         self.chat_send.setDefault(True)
 
@@ -187,6 +219,9 @@ class MainWindow(QMainWindow):
         self.act_verify = QAction("Verify Current File", self)
         self.act_verify.setShortcut(QKeySequence("Ctrl+Enter"))
 
+        self.act_health = QAction("Ollama Health Check", self)
+        self.act_settings = QAction("Settings...", self)
+
         self.act_run = QAction("Run GUI", self)
         self.act_run.setShortcut(QKeySequence("F5"))
 
@@ -211,6 +246,9 @@ class MainWindow(QMainWindow):
 
         m_tools = bar.addMenu("Tools")
         m_tools.addAction(self.act_verify)
+        m_tools.addSeparator()
+        m_tools.addAction(self.act_health)
+        m_tools.addAction(self.act_settings)
         m_tools.addSeparator()
         m_tools.addAction(self.act_run)
 
@@ -237,14 +275,16 @@ class MainWindow(QMainWindow):
         self.act_quit.triggered.connect(self.close)
         self.act_reveal.triggered.connect(self._reveal_in_explorer)
         self.act_run.triggered.connect(self._run_gui_again)
+        self.act_health.triggered.connect(self._ollama_health_check)
+        self.act_settings.triggered.connect(self._open_settings)
 
         self.tree.doubleClicked.connect(self._tree_open)
         self.tree_filter.textChanged.connect(self._tree_jump)
 
         self.editor.textChanged.connect(self._on_editor_changed)
 
-        self.chat_send.clicked.connect(self._chat_send_stub)
-        self.chat_input.returnPressed.connect(self._chat_send_stub)
+        self.chat_send.clicked.connect(self._chat_send)
+        self.chat_input.returnPressed.connect(self._chat_send)
 
     def _status(self, text: str) -> None:
         self.status_bar.showMessage(text, 6000)
@@ -431,6 +471,38 @@ class MainWindow(QMainWindow):
         self._status("Verified OK")
         return True
 
+    def _ollama_health_check(self) -> None:
+        ok, info = self.engine.health()
+        title = "Ollama Health Check"
+        if ok:
+            QMessageBox.information(
+                self,
+                title,
+                f"OK\n\nHost: {self.engine.config.ollama_host}\nModel: {self.engine.config.ollama_model}",
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                title,
+                f"FAILED\n\nHost: {self.engine.config.ollama_host}\nModel: {self.engine.config.ollama_model}\n\n{info}",
+            )
+
+    def _open_settings(self) -> None:
+        dlg = SettingsDialog(self, self.engine)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        host, model = dlg.values()
+        if not host or not model:
+            QMessageBox.warning(self, "Settings", "Host and model are required.")
+            return
+
+        os.environ["OLLAMA_HOST"] = host
+        os.environ["OLLAMA_MODEL"] = model
+
+        self.engine = Engine(EngineConfig(ollama_host=host, ollama_model=model, system_prompt=self.engine.config.system_prompt))
+        self.chat_log.append(f"<i>Settings updated: host={host}, model={model}</i>")
+
     def _reveal_in_explorer(self) -> None:
         target = self.state.path if self.state.path else self.root
         try:
@@ -450,16 +522,23 @@ class MainWindow(QMainWindow):
                 creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
             )
 
-    def _chat_send_stub(self) -> None:
+    def _chat_send(self) -> None:
         text = self.chat_input.text().strip()
         if not text:
             return
         self.chat_input.clear()
         self.chat_log.append(f"<b>You:</b> {text}")
-        self.chat_log.append("<b>Engineer:</b> Stub: engine not wired yet.")
+
+        try:
+            reply = self.engine.send_user(text)
+        except Exception as e:
+            self.chat_log.append(f"<b>Engineer:</b> ERROR: {e}")
+            return
+
+        self.chat_log.append(f"<b>Engineer:</b> {reply or '(no response)'}")
 
     def _about(self) -> None:
-        QMessageBox.information(self, "About", "LocalAISWE\n\nGUI scaffold (editor + verify gate + engineer panel stub).")
+        QMessageBox.information(self, "About", "LocalAISWE\n\nGUI + Engine (Ollama provider).")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.state.dirty:

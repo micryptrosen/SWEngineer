@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+# Ensure project root is importable when running this file directly.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 from PySide6.QtCore import QDir, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QFont, QKeySequence
 from PySide6.QtWidgets import (
@@ -65,7 +70,6 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(50, self._select_app_folder)
 
-    # ---------------- UI ----------------
     def _build_ui(self) -> None:
         self._build_actions()
         self._build_menu()
@@ -80,7 +84,6 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(self.splitter)
 
-        # Left: file tree
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -111,7 +114,6 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(self.tree, 1)
 
-        # Center: editor
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
@@ -132,7 +134,6 @@ class MainWindow(QMainWindow):
         center_layout.addWidget(self.editor_header)
         center_layout.addWidget(self.editor, 1)
 
-        # Right: assistant panel (stub)
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -227,7 +228,6 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_save)
         tb.addAction(self.act_verify)
 
-    # ---------------- Wiring ----------------
     def _wire_actions(self) -> None:
         self.act_open.triggered.connect(self._open_dialog)
         self.act_save.triggered.connect(self._save)
@@ -246,7 +246,6 @@ class MainWindow(QMainWindow):
         self.chat_send.clicked.connect(self._chat_send_stub)
         self.chat_input.returnPressed.connect(self._chat_send_stub)
 
-    # ---------------- Behavior ----------------
     def _status(self, text: str) -> None:
         self.status_bar.showMessage(text, 6000)
 
@@ -276,14 +275,11 @@ class MainWindow(QMainWindow):
 
     def _tree_jump(self, text: str) -> None:
         text = text.strip()
-        if not text:
-            return
-        self.tree.keyboardSearch(text)
+        if text:
+            self.tree.keyboardSearch(text)
 
     def _guard_switch_file(self) -> bool:
-        if not self.state.path:
-            return True
-        if not self.state.dirty:
+        if not self.state.path or not self.state.dirty:
             return True
 
         msg = QMessageBox(self)
@@ -304,24 +300,22 @@ class MainWindow(QMainWindow):
         return False
 
     def _tree_open(self, index: QModelIndex) -> None:
-        if not index.isValid():
-            return
-        path = Path(self.fs_model.filePath(index))
-        if path.is_dir():
-            return
-        self._open_file(path)
+        if index.isValid():
+            path = Path(self.fs_model.filePath(index))
+            if path.is_file():
+                self._open_file(path)
 
     def _open_dialog(self) -> None:
         if not self._guard_switch_file():
             return
         p, _ = QFileDialog.getOpenFileName(self, "Open File", str(self.root), "All Files (*.*)")
-        if not p:
-            return
-        self._open_file(Path(p))
+        if p:
+            self._open_file(Path(p))
 
     def _open_file(self, path: Path) -> None:
         if not self._guard_switch_file():
             return
+
         path = path.resolve()
         if not path.exists():
             QMessageBox.critical(self, "Open failed", f"File not found:\n{path}")
@@ -330,14 +324,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Unsupported", f"Not a supported text file:\n{path}")
             return
 
-        try:
-            text = read_text(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Open failed", f"{path}\n\n{e}")
-            return
-
         self.editor.blockSignals(True)
-        self.editor.setPlainText(text)
+        self.editor.setPlainText(read_text(path))
         self.editor.blockSignals(False)
 
         self.state = FileState(path=path, verified_ok=False, dirty=False)
@@ -347,23 +335,18 @@ class MainWindow(QMainWindow):
     def _reload_current_from_disk(self) -> None:
         if not self.state.path:
             return
-        try:
-            text = read_text(self.state.path)
-        except Exception:
-            return
         self.editor.blockSignals(True)
-        self.editor.setPlainText(text)
+        self.editor.setPlainText(read_text(self.state.path))
         self.editor.blockSignals(False)
         self.state.dirty = False
         self.state.verified_ok = False
         self._refresh_title()
 
     def _on_editor_changed(self) -> None:
-        if not self.state.path:
-            return
-        self.state.dirty = True
-        self.state.verified_ok = False
-        self._refresh_title()
+        if self.state.path:
+            self.state.dirty = True
+            self.state.verified_ok = False
+            self._refresh_title()
 
     def _save(self) -> bool:
         if not self.state.path:
@@ -436,16 +419,11 @@ class MainWindow(QMainWindow):
             "verify",
             str(self.state.path),
         ]
-
         proc = subprocess.run(cmd, cwd=str(self.root), capture_output=True, text=True)
         if proc.returncode != 0:
             self.state.verified_ok = False
             self._refresh_title()
-            QMessageBox.critical(
-                self,
-                "Verify failed",
-                (proc.stdout + "\n" + proc.stderr).strip() or "Unknown error",
-            )
+            QMessageBox.critical(self, "Verify failed", (proc.stdout + "\n" + proc.stderr).strip() or "Unknown error")
             return False
 
         self.state.verified_ok = True
@@ -465,30 +443,24 @@ class MainWindow(QMainWindow):
 
     def _run_gui_again(self) -> None:
         ts = (self.root / "towershell.ps1").resolve()
-        if not ts.exists():
-            QMessageBox.critical(self, "Run failed", f"Missing towershell:\n{ts}")
-            return
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ts), "run"],
-            cwd=str(self.root),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
-        )
+        if ts.exists():
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ts), "run"],
+                cwd=str(self.root),
+                creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
+            )
 
     def _chat_send_stub(self) -> None:
         text = self.chat_input.text().strip()
         if not text:
             return
         self.chat_input.clear()
-        self._append_chat("You", text)
-        self._append_chat("Engineer", "Stub: engine not wired yet.")
-
-    def _append_chat(self, who: str, msg: str) -> None:
-        self.chat_log.append(f"<b>{who}:</b> {msg}")
+        self.chat_log.append(f"<b>You:</b> {text}")
+        self.chat_log.append("<b>Engineer:</b> Stub: engine not wired yet.")
 
     def _about(self) -> None:
         QMessageBox.information(self, "About", "LocalAISWE\n\nGUI scaffold (editor + verify gate + engineer panel stub).")
 
-    # ---------------- Window lifecycle ----------------
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.state.dirty:
             msg = QMessageBox(self)

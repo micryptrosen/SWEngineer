@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ScriptRoot = $PSScriptRoot  # Always anchor to script location
+$ScriptRoot = $PSScriptRoot
 
 function Write-Section([string]$Text) {
   Write-Host ""
@@ -185,10 +185,12 @@ function Action-Install { Ensure-Dirs; Ensure-Venv; Pip-InstallBase; Write-Host 
 function Action-Run {
   $root = Resolve-ProjectRoot
   $venvPy = Get-VenvPython
-  $entry = Join-Path $root "app\main.py"
-  if (-not (Test-Path $entry)) { throw "Missing app\main.py" }
+
+  if (-not (Test-Path (Join-Path $root "app\__init__.py"))) { throw "Missing app\__init__.py" }
+  if (-not (Test-Path (Join-Path $root "app\main.py"))) { throw "Missing app\main.py" }
+
   Write-Section "Running GUI"
-  Invoke-Process $venvPy @($entry) $root 60
+  Invoke-Process $venvPy @("-m", "app.main") $root 60
 }
 
 function Verify-Python([string]$Path) {

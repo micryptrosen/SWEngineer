@@ -9,6 +9,7 @@ Run:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFileSystemModel,
     QFormLayout,
+    QInputDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -46,6 +48,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.config import AppConfig, load_config, save_config
 from app.core.paths import get_paths, is_probably_text_file, read_text, safe_relpath, write_text_atomic
 from app.engine.engine import Engine, EngineConfig
 
@@ -57,20 +60,25 @@ class FileState:
     dirty: bool = False
 
 
+@dataclass
+class FileBlock:
+    path: str
+    content: str
+
+
 class SettingsDialog(QDialog):
-    def __init__(self, parent: QWidget, engine: Engine) -> None:
+    def __init__(self, parent: QWidget, cfg: AppConfig) -> None:
         super().__init__(parent)
-        self.engine = engine
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.resize(520, 160)
+        self.resize(540, 180)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
         layout.addLayout(form)
 
-        self.host = QLineEdit(engine.config.ollama_host)
-        self.model = QLineEdit(engine.config.ollama_model)
+        self.host = QLineEdit(cfg.ollama_host)
+        self.model = QLineEdit(cfg.ollama_model)
 
         form.addRow("Ollama host", self.host)
         form.addRow("Ollama model", self.model)
@@ -80,8 +88,11 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def values(self) -> tuple[str, str]:
-        return self.host.text().strip(), self.model.text().strip()
+    def values(self) -> AppConfig:
+        return AppConfig(
+            ollama_host=self.host.text().strip(),
+            ollama_model=self.model.text().strip(),
+        )
 
 
 class MainWindow(QMainWindow):
@@ -90,7 +101,18 @@ class MainWindow(QMainWindow):
         self.paths = get_paths()
         self.root = self.paths.root
         self.state = FileState()
-        self.engine = Engine()
+
+        self.cfg = load_config(self.root)
+        save_config(self.root, self.cfg)
+
+        self.engine = Engine(
+            EngineConfig(
+                ollama_host=self.cfg.ollama_host,
+                ollama_model=self.cfg.ollama_model,
+            )
+        )
+
+        self._chat_history: list[tuple[str, str]] = []
 
         self.setWindowTitle("LocalAISWE")
         self.resize(1400, 900)
@@ -222,6 +244,9 @@ class MainWindow(QMainWindow):
         self.act_health = QAction("Ollama Health Check", self)
         self.act_settings = QAction("Settings...", self)
 
+        self.act_apply_file = QAction("Apply Engineer File Block", self)
+        self.act_apply_file.setShortcut(QKeySequence("Ctrl+Shift+Enter"))
+
         self.act_run = QAction("Run GUI", self)
         self.act_run.setShortcut(QKeySequence("F5"))
 
@@ -250,6 +275,8 @@ class MainWindow(QMainWindow):
         m_tools.addAction(self.act_health)
         m_tools.addAction(self.act_settings)
         m_tools.addSeparator()
+        m_tools.addAction(self.act_apply_file)
+        m_tools.addSeparator()
         m_tools.addAction(self.act_run)
 
         m_help = QMenu("Help", self)
@@ -265,6 +292,7 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_open)
         tb.addAction(self.act_save)
         tb.addAction(self.act_verify)
+        tb.addAction(self.act_apply_file)
 
     def _wire_actions(self) -> None:
         self.act_open.triggered.connect(self._open_dialog)
@@ -277,6 +305,7 @@ class MainWindow(QMainWindow):
         self.act_run.triggered.connect(self._run_gui_again)
         self.act_health.triggered.connect(self._ollama_health_check)
         self.act_settings.triggered.connect(self._open_settings)
+        self.act_apply_file.triggered.connect(self._apply_engineer_file_block)
 
         self.tree.doubleClicked.connect(self._tree_open)
         self.tree_filter.textChanged.connect(self._tree_jump)
@@ -488,20 +517,29 @@ class MainWindow(QMainWindow):
             )
 
     def _open_settings(self) -> None:
-        dlg = SettingsDialog(self, self.engine)
+        dlg = SettingsDialog(self, self.cfg)
         if dlg.exec() != QDialog.Accepted:
             return
 
-        host, model = dlg.values()
-        if not host or not model:
+        cfg = dlg.values()
+        if not cfg.ollama_host or not cfg.ollama_model:
             QMessageBox.warning(self, "Settings", "Host and model are required.")
             return
 
-        os.environ["OLLAMA_HOST"] = host
-        os.environ["OLLAMA_MODEL"] = model
+        self.cfg = cfg
+        save_config(self.root, self.cfg)
 
-        self.engine = Engine(EngineConfig(ollama_host=host, ollama_model=model, system_prompt=self.engine.config.system_prompt))
-        self.chat_log.append(f"<i>Settings updated: host={host}, model={model}</i>")
+        os.environ["OLLAMA_HOST"] = self.cfg.ollama_host
+        os.environ["OLLAMA_MODEL"] = self.cfg.ollama_model
+
+        self.engine = Engine(
+            EngineConfig(
+                ollama_host=self.cfg.ollama_host,
+                ollama_model=self.cfg.ollama_model,
+                system_prompt=self.engine.config.system_prompt,
+            )
+        )
+        self._append_chat("System", f"Settings saved to data/config.json (host={cfg.ollama_host}, model={cfg.ollama_model}).")
 
     def _reveal_in_explorer(self) -> None:
         target = self.state.path if self.state.path else self.root
@@ -522,20 +560,83 @@ class MainWindow(QMainWindow):
                 creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
             )
 
+    def _append_chat(self, who: str, msg: str) -> None:
+        self._chat_history.append((who, msg))
+        self.chat_log.append(f"<b>{who}:</b> {msg}")
+
     def _chat_send(self) -> None:
         text = self.chat_input.text().strip()
         if not text:
             return
         self.chat_input.clear()
-        self.chat_log.append(f"<b>You:</b> {text}")
+        self._append_chat("You", text)
 
         try:
             reply = self.engine.send_user(text)
         except Exception as e:
-            self.chat_log.append(f"<b>Engineer:</b> ERROR: {e}")
+            self._append_chat("Engineer", f"ERROR: {e}")
             return
 
-        self.chat_log.append(f"<b>Engineer:</b> {reply or '(no response)'}")
+        self._append_chat("Engineer", reply or "(no response)")
+
+    def _extract_file_blocks(self, text: str) -> list[FileBlock]:
+        blocks: list[FileBlock] = []
+        for m in re.finditer(r"```(?:[a-zA-Z0-9_+-]+)?\n(.*?)```", text, flags=re.DOTALL):
+            body = m.group(1)
+            lines = body.splitlines()
+            if not lines:
+                continue
+            first = lines[0].strip()
+            if not first.lower().startswith("# file:"):
+                continue
+            file_path = first.split(":", 1)[1].strip()
+            content = "\n".join(lines[1:]).lstrip("\n")
+            if file_path:
+                blocks.append(FileBlock(path=file_path, content=content))
+        return blocks
+
+    def _latest_engineer_text(self) -> str:
+        for who, msg in reversed(self._chat_history):
+            if who == "Engineer":
+                return msg
+        return ""
+
+    def _apply_engineer_file_block(self) -> None:
+        if not self._guard_switch_file():
+            return
+
+        last = self._latest_engineer_text()
+        if not last:
+            QMessageBox.information(self, "Apply", "No Engineer message found.")
+            return
+
+        blocks = self._extract_file_blocks(last)
+        if not blocks:
+            QMessageBox.information(self, "Apply", "No file blocks found in the latest Engineer message.")
+            return
+
+        if len(blocks) == 1:
+            chosen = blocks[0]
+        else:
+            choices = [b.path for b in blocks]
+            choice, ok = QInputDialog.getItem(self, "Apply", "Choose file to apply:", choices, 0, False)
+            if not ok or not choice:
+                return
+            chosen = next(b for b in blocks if b.path == choice)
+
+        target = Path(chosen.path)
+        if not target.is_absolute():
+            target = (self.root / target).resolve()
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(target, chosen.content)
+        except Exception as e:
+            QMessageBox.critical(self, "Apply failed", f"{target}\n\n{e}")
+            return
+
+        self._open_file(target)
+        self._verify_current()
 
     def _about(self) -> None:
         QMessageBox.information(self, "About", "LocalAISWE\n\nGUI + Engine (Ollama provider).")

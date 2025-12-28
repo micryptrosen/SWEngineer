@@ -48,3 +48,10 @@ pip*.txt
 pip*.out
 *.pip.log
 *.pip.txt
+
+# ---- Downloaded packages / archives (don’t commit) ----
+*.whl
+*.tar.gz
+*.zip
+*.7z
+*.rar

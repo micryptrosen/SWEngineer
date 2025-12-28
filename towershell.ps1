@@ -15,12 +15,14 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 function Write-Section([string]$Text) {
   Write-Host ""
   Write-Host "== $Text =="
 }
 
-function Resolve-ProjectRoot { (Get-Location).Path }
+function Resolve-ProjectRoot { $ScriptRoot }
 
 function Get-SystemPython {
   $python = Get-Command python -ErrorAction SilentlyContinue
@@ -34,9 +36,7 @@ function Get-SystemPython {
 
 function Escape-Arg([string]$s) {
   if ($null -eq $s) { return '""' }
-  if ($s -match '[\s"]') {
-    return '"' + ($s -replace '"', '\"') + '"'
-  }
+  if ($s -match '[\s"]') { return '"' + ($s -replace '"', '\"') + '"' }
   return $s
 }
 
@@ -78,9 +78,7 @@ function Invoke-Process(
   if ($stdout) { Write-Host $stdout }
   if ($stderr) { Write-Host $stderr }
 
-  if ($p.ExitCode -ne 0) {
-    throw "Command failed with exit code $($p.ExitCode): $FilePath $argText"
-  }
+  if ($p.ExitCode -ne 0) { throw "Command failed with exit code $($p.ExitCode): $FilePath $argText" }
 }
 
 function Ensure-Dirs {
@@ -119,9 +117,7 @@ function Ensure-Dirs {
 
   foreach ($d in $dirs) {
     $p = Join-Path $root $d
-    if (-not (Test-Path $p)) {
-      New-Item -ItemType Directory -Path $p | Out-Null
-    }
+    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null }
   }
 }
 
@@ -136,9 +132,7 @@ function Ensure-Venv {
   $prefix = $pyInfo[1]
   Invoke-Process $exe ($prefix + @("-m", "venv", ".venv")) $root 180
 
-  if (-not (Test-Path $venvPy)) {
-    throw "Venv created but python.exe not found at: $venvPy"
-  }
+  if (-not (Test-Path $venvPy)) { throw "Venv created but python.exe not found at: $venvPy" }
 }
 
 function Get-VenvPython {
@@ -160,19 +154,6 @@ function Pip-InstallBase {
     Invoke-Process $venvPy @("-m","pip","install","-r","requirements.txt") $root 900
     return
   }
-
-  $pkgs = @(
-    "pyside6>=6.7",
-    "pydantic>=2.7",
-    "httpx>=0.27",
-    "rich>=13.7",
-    "pytest>=8.2",
-    "ruff>=0.6",
-    "black>=24.4",
-    "mypy>=1.10",
-    "pyinstaller>=6.7"
-  )
-  Invoke-Process $venvPy (@("-m","pip","install") + $pkgs) $root 900
 }
 
 function Action-Help {
@@ -191,19 +172,8 @@ Usage:
 "@ | Write-Host
 }
 
-function Action-Init {
-  Write-Section "Initializing project scaffold"
-  Ensure-Dirs
-  Ensure-Venv
-  Write-Host "OK"
-}
-
-function Action-Install {
-  Ensure-Dirs
-  Ensure-Venv
-  Pip-InstallBase
-  Write-Host "OK"
-}
+function Action-Init { Write-Section "Initializing project scaffold"; Ensure-Dirs; Ensure-Venv; Write-Host "OK" }
+function Action-Install { Ensure-Dirs; Ensure-Venv; Pip-InstallBase; Write-Host "OK" }
 
 function Action-Run {
   $root = Resolve-ProjectRoot

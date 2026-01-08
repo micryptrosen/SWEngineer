@@ -1,10 +1,9 @@
 # File: C:\Dev\CCP\SWEngineer\.gitignore
 
-# ---- Python ----
+# Python
 __pycache__/
 *.py[cod]
 *.pyd
-*.pyo
 *.so
 *.egg-info/
 .eggs/
@@ -14,44 +13,24 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Virtual environments
+# Virtual env
 .venv/
 venv/
-ENV/
-env/
 
-# ---- Builds / Packaging ----
+# Builds
 build/
 dist/
 *.spec
 
-# ---- Project runtime/output ----
-logs/
-tmp/
-data/models/
-data/sessions/
-data/telemetry/
-
-# ---- IDE ----
+# OS / IDE
+.DS_Store
+Thumbs.db
 .vscode/
 .idea/
 
-# ---- OS ----
-.DS_Store
-Thumbs.db
-desktop.ini
+# Logs
+*.log
 
-# ---- Pip / install transcripts (accidental logs) ----
-pip-log.txt
-pip-*.log
-pip*.txt
-pip*.out
-*.pip.log
-*.pip.txt
-
-# ---- Downloaded packages / archives (don’t commit) ----
-*.whl
-*.tar.gz
-*.zip
-*.7z
-*.rar
+# Runtime data (do not commit)
+data/*
+!data/.gitkeep

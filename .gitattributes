@@ -1,0 +1,29 @@
+# Normalize text files in repo; keep working tree consistent.
+* text=auto
+
+# GitHub Actions + config files should be LF
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+
+# PowerShell should be CRLF on Windows
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+
+# Windows batch
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.exe binary
+*.dll binary

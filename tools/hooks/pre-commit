@@ -1,0 +1,8 @@
+#!/bin/sh
+SENTINEL=".gates/LAST_GREEN.txt"
+if [ ! -f "$SENTINEL" ]; then
+  echo "FAILURE DETECTED: No GREEN gate sentinel found ($SENTINEL)."
+  echo "Run: powershell -NoProfile -ExecutionPolicy Bypass -File Run-Gates.ps1"
+  exit 1
+fi
+exit 0

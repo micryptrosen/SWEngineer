@@ -14,25 +14,16 @@ if (-not (Test-Path -LiteralPath $py)) {
 & $py -m pip install -U pip | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: pip upgrade failed (exit=$LASTEXITCODE)." }
 
+if (-not (Test-Path -LiteralPath "C:\Dev\CCP\SWEngineer\requirements.txt")) { throw "FAILURE DETECTED: missing C:\Dev\CCP\SWEngineer\requirements.txt" }
+if (-not (Test-Path -LiteralPath "C:\Dev\CCP\SWEngineer\requirements-dev.txt")) { throw "FAILURE DETECTED: missing C:\Dev\CCP\SWEngineer\requirements-dev.txt" }
+
 & $py -m pip install -r "C:\Dev\CCP\SWEngineer\requirements.txt" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: runtime deps install failed (exit=$LASTEXITCODE)." }
 
 & $py -m pip install -r "C:\Dev\CCP\SWEngineer\requirements-dev.txt" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: dev deps install failed (exit=$LASTEXITCODE)." }
 
-& $py -m compileall -q .
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: compileall gate is RED (exit=$LASTEXITCODE)." }
+& $py "C:\Dev\CCP\SWEngineer\tools\gates.py" --mode local
+if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: gates.py failed (exit=$LASTEXITCODE)." }
 
-& $py -m black .
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: black format failed (exit=$LASTEXITCODE)." }
-
-& $py -m ruff check .
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: ruff gate is RED (exit=$LASTEXITCODE)." }
-
-& $py -m pytest -q
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: pytest gate is RED (exit=$LASTEXITCODE)." }
-
-New-Item -ItemType Directory -Force -Path ".gates" | Out-Null
-"GREEN " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") | Set-Content -LiteralPath ".gates\LAST_GREEN.txt" -Encoding UTF8
-
-Write-Host "GATES=GREEN SENTINEL=.gates\LAST_GREEN.txt"
+Write-Host "GATES=GREEN SENTINEL=C:\Dev\CCP\SWEngineer\.gates\LAST_GREEN.txt"

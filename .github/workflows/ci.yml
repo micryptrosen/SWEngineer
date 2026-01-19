@@ -34,28 +34,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Compile (compileall)
+      - name: Gates (single source of truth)
         shell: bash
         run: |
-          if [ -d app ]; then
-            python -m compileall -q app
-          else
-            python -m compileall -q .
-          fi
-
-      - name: Ruff
-        shell: bash
-        run: |
-          ruff --version
-          ruff check .
-
-      - name: Black (check)
-        shell: bash
-        run: |
-          black --version
-          black --check .
-
-      - name: Pytest
-        shell: bash
-        run: |
-          python -m pytest -q
+          python tools/gates.py --mode ci

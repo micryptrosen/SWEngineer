@@ -52,8 +52,12 @@ class FileWrite(BaseModel):
 
 
 class CommandRun(BaseModel):
-    cwd: Optional[str] = Field(default=None, description="Working directory (project root if omitted).")
-    command: List[str] = Field(..., description="Process argv, e.g. ['powershell','-NoProfile',...].")
+    cwd: Optional[str] = Field(
+        default=None, description="Working directory (project root if omitted)."
+    )
+    command: List[str] = Field(
+        ..., description="Process argv, e.g. ['powershell','-NoProfile',...]."
+    )
     timeout_sec: int = 120
 
 

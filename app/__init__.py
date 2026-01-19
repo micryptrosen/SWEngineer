@@ -13,4 +13,3 @@ from __future__ import annotations
 APP_NAME: str = "LocalAISWE"
 APP_ID: str = "localaiswe"
 __version__: str = "0.1.0"
-

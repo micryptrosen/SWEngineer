@@ -453,7 +453,9 @@ class MainWindow(QMainWindow):
         self.act_run.triggered.connect(self._run_gui_again)
 
         self.tree.doubleClicked.connect(self._tree_open)
-        self.tree_filter.textChanged.connect(lambda t: self.tree.keyboardSearch(t.strip()) if t.strip() else None)
+        self.tree_filter.textChanged.connect(
+            lambda t: self.tree.keyboardSearch(t.strip()) if t.strip() else None
+        )
 
         self.editor.textChanged.connect(self._on_editor_changed)
         self.chat_send.clicked.connect(self._chat_send)
@@ -570,10 +572,14 @@ class MainWindow(QMainWindow):
 
     def _block_if_binary_target(self, target: Path, incoming: str) -> bool:
         if target.suffix.lower() in _BINARY_EXTS:
-            QMessageBox.critical(self, "Apply blocked", f"Refusing binary extension:\n{target.name}")
+            QMessageBox.critical(
+                self, "Apply blocked", f"Refusing binary extension:\n{target.name}"
+            )
             return True
         if target.exists() and not is_probably_text_file(target):
-            QMessageBox.critical(self, "Apply blocked", f"Refusing to overwrite non-text file:\n{target.name}")
+            QMessageBox.critical(
+                self, "Apply blocked", f"Refusing to overwrite non-text file:\n{target.name}"
+            )
             return True
         if not _is_probably_text_content(incoming):
             QMessageBox.critical(self, "Apply blocked", "Incoming content looks non-text/binary.")
@@ -583,13 +589,19 @@ class MainWindow(QMainWindow):
     def _block_if_too_large(self, incoming: str) -> bool:
         lines = len((incoming or "").splitlines())
         if APPLY_MAX_LINES and lines > APPLY_MAX_LINES:
-            QMessageBox.critical(self, "Apply blocked", f"Incoming content too many lines: {lines} > {APPLY_MAX_LINES}")
+            QMessageBox.critical(
+                self,
+                "Apply blocked",
+                f"Incoming content too many lines: {lines} > {APPLY_MAX_LINES}",
+            )
             return True
         if APPLY_MAX_BYTES:
             b = len((incoming or "").encode("utf-8", errors="replace"))
             if b > APPLY_MAX_BYTES:
                 QMessageBox.critical(
-                    self, "Apply blocked", f"Incoming content too large: {b} bytes > {APPLY_MAX_BYTES} bytes"
+                    self,
+                    "Apply blocked",
+                    f"Incoming content too large: {b} bytes > {APPLY_MAX_BYTES} bytes",
                 )
                 return True
         return False
@@ -629,7 +641,9 @@ class MainWindow(QMainWindow):
             if ENGINE_STRICT_ACTION_WHITELIST:
                 for a in payload.actions:
                     if a.type not in _ALLOWED_ACTION_TYPES:
-                        QMessageBox.critical(self, "Apply blocked", f"Disallowed action type: {a.type}")
+                        QMessageBox.critical(
+                            self, "Apply blocked", f"Disallowed action type: {a.type}"
+                        )
                         return None
             blocks = payload_to_file_blocks(payload)
             if ENGINE_REFUSE_MISSING_PATH:
@@ -766,7 +780,9 @@ class MainWindow(QMainWindow):
         if proc.returncode != 0:
             self.state.verified_ok = False
             self._refresh_title()
-            QMessageBox.critical(self, "Verify failed", (proc.stdout + "\n" + proc.stderr).strip() or "Unknown error")
+            QMessageBox.critical(
+                self, "Verify failed", (proc.stdout + "\n" + proc.stderr).strip() or "Unknown error"
+            )
             return False
 
         self.state.verified_ok = True
@@ -791,8 +807,12 @@ class MainWindow(QMainWindow):
         os.environ["OLLAMA_HOST"] = cfg.ollama_host
         os.environ["OLLAMA_MODEL"] = cfg.ollama_model
 
-        self.engine = Engine(EngineConfig(ollama_host=cfg.ollama_host, ollama_model=cfg.ollama_model))
-        self._append_chat("System", f"Saved settings: host={cfg.ollama_host}, model={cfg.ollama_model}")
+        self.engine = Engine(
+            EngineConfig(ollama_host=cfg.ollama_host, ollama_model=cfg.ollama_model)
+        )
+        self._append_chat(
+            "System", f"Saved settings: host={cfg.ollama_host}, model={cfg.ollama_model}"
+        )
 
     def _health(self) -> None:
         ok, info = self.engine.health()
@@ -817,7 +837,11 @@ class MainWindow(QMainWindow):
             subprocess.Popen(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ts), "run"],
                 cwd=str(self.root),
-                creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, "CREATE_NEW_CONSOLE") else 0,
+                creationflags=(
+                    subprocess.CREATE_NEW_CONSOLE
+                    if hasattr(subprocess, "CREATE_NEW_CONSOLE")
+                    else 0
+                ),
             )
 
     # ---------- chat / apply ----------
@@ -825,7 +849,7 @@ class MainWindow(QMainWindow):
     def _append_chat(self, who: str, msg: str) -> None:
         self._chat.append((who, msg))
         if len(self._chat) > CHAT_HISTORY_MAX:
-            self._chat = self._chat[-CHAT_HISTORY_MAX :]
+            self._chat = self._chat[-CHAT_HISTORY_MAX:]
         self.chat_log.append(f"<b>{who}:</b> {msg}")
 
     def _chat_send(self) -> None:
@@ -874,7 +898,9 @@ class MainWindow(QMainWindow):
     def _apply_from_last_engineer(self) -> None:
         if REFUSE_APPLY_IF_CURRENT_DIRTY and self.state.path and self.state.dirty:
             QMessageBox.critical(
-                self, "Apply blocked", "Current file is dirty.\n\nSave + verify the current file before applying."
+                self,
+                "Apply blocked",
+                "Current file is dirty.\n\nSave + verify the current file before applying.",
             )
             return
 
@@ -918,7 +944,9 @@ class MainWindow(QMainWindow):
                 return
 
         if not exists and not APPLY_ALLOW_CREATE:
-            QMessageBox.critical(self, "Apply blocked", "Target does not exist and creation is disabled.")
+            QMessageBox.critical(
+                self, "Apply blocked", "Target does not exist and creation is disabled."
+            )
             return
 
         if self._block_if_binary_target(target, chosen.content):

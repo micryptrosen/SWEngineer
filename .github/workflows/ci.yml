@@ -25,41 +25,37 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install dependencies (if files exist)
+      - name: Install dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          test -f requirements.txt || (echo "Missing requirements.txt" && exit 1)
+          test -f requirements-dev.txt || (echo "Missing requirements-dev.txt" && exit 1)
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
-      - name: Compile (py_compile / compileall)
+      - name: Compile (compileall)
         shell: bash
         run: |
-          python -m compileall -q app
-
-      - name: Ruff (if installed)
-        shell: bash
-        run: |
-          if python -c "import ruff" >/dev/null 2>&1; then
-            python -m ruff check .
+          if [ -d app ]; then
+            python -m compileall -q app
           else
-            echo "ruff not installed; skipping"
+            python -m compileall -q .
           fi
 
-      - name: Black (check, if installed)
+      - name: Ruff
         shell: bash
         run: |
-          if python -c "import black" >/dev/null 2>&1; then
-            python -m black --check .
-          else
-            echo "black not installed; skipping"
-          fi
+          ruff --version
+          ruff check .
 
-      - name: Pytest (if tests exist)
+      - name: Black (check)
         shell: bash
         run: |
-          if [ -d tests ]; then
-            python -m pytest -q
-          else
-            echo "No tests/ folder; skipping"
-          fi
+          black --version
+          black --check .
+
+      - name: Pytest
+        shell: bash
+        run: |
+          python -m pytest -q

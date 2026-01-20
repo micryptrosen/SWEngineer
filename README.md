@@ -1,23 +1,20 @@
-# File: C:\Dev\CCP\SWEngineer\README.md
+# SWEngineer
 
-# SWEngineer (LocalAISWE)
+Local "Nova-in-a-box" style software engineer assistant (GUI-first) with deterministic gates.
 
-Local AI Software Engineer (Windows 11) — GUI + local engine runtime (in progress).
+## Python
+- Required: Python 3.12+ (repo is locked to 3.12 in CI)
 
-## Requirements
-- Windows 11
-- Python 3.11+
-- PowerShell
-- (Optional) GitHub CLI: `gh`
+## Quickstart (Windows)
+Commands:
+1) Set-Location -LiteralPath "C:\Dev\CCP\SWEngineer"
+2) powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Install-Hooks.ps1
+3) powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-Gates.ps1
 
-## Project root
-This repo is designed to run from:
-`C:\Dev\CCP\SWEngineer`
+## Gates (single source of truth)
+ - tools/gates.py is authoritative.
+ - Local: powershell -NoProfile -ExecutionPolicy Bypass -File .\Run-Gates.ps1
+ - CI: python tools/gates.py --mode ci
 
-## Setup (first time)
-Run this in PowerShell:
-
-```powershell
-cd C:\Dev\CCP\SWEngineer
-powershell -NoProfile -ExecutionPolicy Bypass -File .\towershell.ps1 init
-powershell -NoProfile -ExecutionPolicy Bypass -File .\towershell.ps1 install
+## Commit Firewall
+Commits are blocked unless ".gates/LAST_GREEN.txt" exists (minted by running gates).

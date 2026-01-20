@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-
 _JSON_ONLY_SYSTEM_PROMPT = (
     "You are a local AI software engineer.\n"
     "You MUST respond with ONLY a single JSON object (no markdown, no code fences, no extra text).\n"

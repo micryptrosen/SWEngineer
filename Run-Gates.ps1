@@ -1,29 +1,22 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-Set-Location -LiteralPath "C:\Dev\CCP\SWEngineer"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location -LiteralPath $root
 
-$venv = Join-Path (Get-Location).Path ".venv"
-$py = Join-Path $venv "Scripts\python.exe"
+$py = Join-Path $root ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $py)) { throw "FAILURE DETECTED: missing venv python at $py (create venv first)." }
 
-if (-not (Test-Path -LiteralPath $py)) {
-  python -m venv $venv
-  if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: venv creation failed (exit=$LASTEXITCODE)." }
-}
+$gatesDir = Join-Path $root ".gates"
+New-Item -ItemType Directory -Path $gatesDir -Force | Out-Null
 
-& $py -m pip install -U pip | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: pip upgrade failed (exit=$LASTEXITCODE)." }
-
-if (-not (Test-Path -LiteralPath "C:\Dev\CCP\SWEngineer\requirements.txt")) { throw "FAILURE DETECTED: missing C:\Dev\CCP\SWEngineer\requirements.txt" }
-if (-not (Test-Path -LiteralPath "C:\Dev\CCP\SWEngineer\requirements-dev.txt")) { throw "FAILURE DETECTED: missing C:\Dev\CCP\SWEngineer\requirements-dev.txt" }
-
-& $py -m pip install -r "C:\Dev\CCP\SWEngineer\requirements.txt" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: runtime deps install failed (exit=$LASTEXITCODE)." }
-
-& $py -m pip install -r "C:\Dev\CCP\SWEngineer\requirements-dev.txt" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: dev deps install failed (exit=$LASTEXITCODE)." }
-
-& $py "C:\Dev\CCP\SWEngineer\tools\gates.py" --mode local
+Write-Host "=== GATES (tools/gates.py) ==="
+& $py (Join-Path $root "tools\gates.py") --mode local
 if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: gates.py failed (exit=$LASTEXITCODE)." }
 
-Write-Host "GATES=GREEN SENTINEL=C:\Dev\CCP\SWEngineer\.gates\LAST_GREEN.txt"
+# Mint HEAD-bound sentinel (runtime-only; .gates is gitignored)
+$head = (git rev-parse HEAD).Trim()
+$sent = Join-Path $gatesDir "LAST_GREEN.txt"
+Set-Content -LiteralPath $sent -Encoding UTF8 -Value ("HEAD=" + $head + "`n")
+Write-Host ("SENTINEL_HEAD=" + $head)
+Write-Host ("GATES=GREEN SENTINEL=" + $sent)

@@ -1,9 +1,11 @@
 """
-GUI persistence (Phase 2A3)
+GUI persistence (Phase 2A4)
 
-- Repo-local, append-only JSONL stores
-- No execution. No engine invocation.
-- Designed to be deterministic and testable.
+Event-sourced, append-only JSONL.
+- tasks: data/task_events.jsonl
+- evidence: evidence/evidence.jsonl
+
+No execution. No engine invocation.
 """
 
 from __future__ import annotations
@@ -19,11 +21,12 @@ def utc_now_iso() -> str:
 
 
 @dataclass(frozen=True)
-class TaskRecord:
+class TaskEvent:
     task_id: str
+    event: str  # CREATED | STATUS
+    created_utc: str
     title: str
     status: str
-    created_utc: str
     details: str
 
 
@@ -37,7 +40,6 @@ class EvidenceRecord:
 
 
 def _repo_root() -> Path:
-    # app/gui/store.py -> repo root at 3 levels up: app/gui/ -> app/ -> repo
     return Path(__file__).resolve().parents[2]
 
 
@@ -66,29 +68,38 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 class GuiStore:
-    """
-    Repo-local store:
-      data/tasks.jsonl
-      evidence/evidence.jsonl
-    """
-
     def __init__(self, base_dir: Path | None = None) -> None:
         self.root = base_dir or _repo_root()
-        self.tasks_path = self.root / "data" / "tasks.jsonl"
+        self.task_events_path = self.root / "data" / "task_events.jsonl"
         self.evidence_path = self.root / "evidence" / "evidence.jsonl"
 
-    # ---- tasks ----
-    def append_task(self, rec: TaskRecord) -> None:
-        _append_jsonl(self.tasks_path, asdict(rec))
+    # ----_toggle: tasks ----
+    def append_task_event(self, ev: TaskEvent) -> None:
+        _append_jsonl(self.task_events_path, asdict(ev))
 
-    def read_tasks(self) -> list[TaskRecord]:
-        rows = _read_jsonl(self.tasks_path)
-        return [TaskRecord(**r) for r in rows]
+    def read_task_events(self) -> list[TaskEvent]:
+        return [TaskEvent(**r) for r in _read_jsonl(self.task_events_path)]
+
+    def materialize_tasks(self) -> list[TaskEvent]:
+        """
+        Returns last-known state per task_id as TaskEvent rows (event='STATE').
+        """
+        events = self.read_task_events()
+        state: dict[str, TaskEvent] = {}
+        for e in events:
+            state[e.task_id] = TaskEvent(
+                task_id=e.task_id,
+                event="STATE",
+                created_utc=e.created_utc,
+                title=e.title,
+                status=e.status,
+                details=e.details,
+            )
+        return [state[k] for k in sorted(state.keys())]
 
     # ---- evidence ----
     def append_evidence(self, rec: EvidenceRecord) -> None:
         _append_jsonl(self.evidence_path, asdict(rec))
 
     def read_evidence(self) -> list[EvidenceRecord]:
-        rows = _read_jsonl(self.evidence_path)
-        return [EvidenceRecord(**r) for r in rows]
+        return [EvidenceRecord(**r) for r in _read_jsonl(self.evidence_path)]

@@ -36,6 +36,10 @@ def main() -> int:
     # Lint
     _run([py, "-m", "ruff", "check", "."], cwd=root)
 
+    # CI workflow sanity (if validator exists)
+    v = root / "tools" / "validate_ci.py"
+    if v.exists():
+        _run([py, str(v)], cwd=root)
     # Tests (must run; smoke test exists)
     _run([py, "-m", "pytest", "-q"], cwd=root)
 

@@ -37,3 +37,5 @@ data/*
 # Runtime / local
 .gates/
 *.pyc
+# Patch scratch (never commit)
+_patch_*.py

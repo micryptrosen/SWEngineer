@@ -1,9 +1,14 @@
 """
-SWEngineer GUI Shell (Phase 2A4)
+SWEngineer GUI Shell (Phase 2A5)
 
-- Planner-only Task Queue with event-sourced persistence
-- Evidence stream with Add Note (append-only)
-- No engine execution
+Planner-only shell:
+- Task Queue (event-sourced, append-only)
+- Evidence stream (append-only)
+- Evidence tools:
+  - Paste-in Gate Snapshot (does NOT execute gates)
+  - Session template helpers (Start-Day / Close / Note)
+
+No engine execution.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -29,6 +35,70 @@ from .store import EvidenceRecord, GuiStore, TaskEvent, utc_now_iso
 
 def _safe(s: str) -> str:
     return (s or "").strip()
+
+
+def _truncate(s: str, n: int) -> str:
+    s = _safe(s)
+    return s if len(s) <= n else (s[: n - 1] + "…")
+
+
+def _template_start_day() -> str:
+    return "\n".join(
+        [
+            "START-DAY DECLARATION",
+            "",
+            "EFFORT: SWEngineer — GUI Scaffold (Phase 2A)",
+            "AUTHORITY: Michael A. Trosen (Operator)",
+            "STATE: ACTIVE",
+            "REPO: C:\\Dev\\CCP\\SWEngineer (origin: micryptrosen/SWEngineer.git)",
+            "BASELINE: Gates locked (PUBLISH=GREEN)",
+            "",
+            "Objective",
+            "",
+            "- (fill in)",
+            "",
+            "Non-negotiables",
+            "",
+            "- Gates remain authoritative (tools/gates.py)",
+            "- No commits without green gates",
+            "- Paste-safe + idempotent workflow",
+            "",
+            "Next best step",
+            "",
+            "- (fill in)",
+        ]
+    )
+
+
+def _template_close() -> str:
+    return "\n".join(
+        [
+            "CLOSE DECLARATION",
+            "",
+            "EFFORT: SWEngineer — GUI Scaffold (Phase 2A)",
+            "STATE: CLOSED",
+            "RESULT: PUBLISH=GREEN",
+            "",
+            "Artifacts",
+            "",
+            "- Tag: (paste tag)",
+            "- Notes: (what changed)",
+            "",
+            "Next",
+            "",
+            "- (fill in)",
+        ]
+    )
+
+
+def _template_note() -> str:
+    return "\n".join(
+        [
+            "NOTE",
+            "",
+            "- (write note)",
+        ]
+    )
 
 
 class TaskQueuePanel(QWidget):
@@ -78,7 +148,8 @@ class TaskQueuePanel(QWidget):
         self.reload()
         if self.list.count() == 0:
             self._append_create(
-                "Wire event-sourced tasks", "Append-only task events under data/task_events.jsonl."
+                "Try Gate Snapshot paste-in",
+                "Use Evidence pane tools to log gates without execution.",
             )
             self.reload()
 
@@ -111,9 +182,9 @@ class TaskQueuePanel(QWidget):
             )
         )
 
-    def _append_statuss(self, tid: str, title: str, status: str, details: str) -> None:
+    def _append_status(self, task_id: str, title: str, status: str, details: str) -> None:
         ev = TaskEvent(
-            task_id=tid,
+            task_id=task_id,
             event="STATUS",
             created_utc=utc_now_iso(),
             title=title,
@@ -126,7 +197,7 @@ class TaskQueuePanel(QWidget):
                 ev_id=self._next_ev_id(),
                 kind="UI",
                 created_utc=utc_now_iso(),
-                summary=f"Task status: {tid} -> {status}",
+                summary=f"Task status: {task_id} -> {status}",
                 body=str(ev),
             )
         )
@@ -165,26 +236,6 @@ class TaskQueuePanel(QWidget):
             return
         self._append_status(t.task_id, t.title, "DONE", "Marked DONE in GUI (planner-only).")
         self.reload()
-
-    def _append_status(self, task_id: str, title: str, status: str, details: str) -> None:
-        ev = TaskEvent(
-            task_id=task_id,
-            event="STATUS",
-            created_utc=utc_now_iso(),
-            title=title,
-            status=status,
-            details=_safe(details),
-        )
-        self.store.append_task_event(ev)
-        self.store.append_evidence(
-            EvidenceRecord(
-                ev_id=self._next_ev_id(),
-                kind="UI",
-                created_utc=utc_now_iso(),
-                summary=f"Task status: {task_id} -> {status}",
-                body=str(ev),
-            )
-        )
 
     def _on_select(self, current: QListWidgetItem | None, _prev: QListWidgetItem | None) -> None:
         if current is None:
@@ -225,22 +276,42 @@ class EvidencePanel(QWidget):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         outer.addWidget(header)
 
-        hint = QLabel("Append-only evidence stream (local). Add notes; no execution.")
+        hint = QLabel("Append-only evidence stream (local). Paste-in snapshots; no execution.")
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
 
-        note_row = QHBoxLayout()
-        self.in_note = QLineEdit()
-        self.in_note.setPlaceholderText("Add evidence note…")
-        self.btn_note = QPushButton("Add Note")
-        self.btn_note.clicked.connect(self._on_add_note)
+        # --- Templates row ---
+        tpl_row = QHBoxLayout()
+        tpl_row.addWidget(QLabel("Template:"))
+        self.tpl = QComboBox()
+        self.tpl.addItems(["Note", "Start-Day", "Close"])
+        self.btn_apply_tpl = QPushButton("Apply Template")
+        self.btn_apply_tpl.clicked.connect(self._on_apply_template)
+        tpl_row.addWidget(self.tpl)
+        tpl_row.addWidget(self.btn_apply_tpl)
+        tpl_row.addStretch(1)
+        outer.addLayout(tpl_row)
+
+        # --- Editor + actions ---
+        self.editor = QTextEdit()
+        self.editor.setPlaceholderText("Write a note, or paste gate output below…")
+        outer.addWidget(self.editor, 1)
+
+        actions = QHBoxLayout()
+        self.btn_save_note = QPushButton("Save Note")
+        self.btn_save_note.clicked.connect(self._on_save_note)
+        self.btn_save_gate = QPushButton("Save Gate Snapshot")
+        self.btn_save_gate.clicked.connect(self._on_save_gate)
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self.reload)
-        note_row.addWidget(self.in_note, 1)
-        note_row.addWidget(self.btn_note)
-        note_row.addWidget(self.btn_refresh)
-        outer.addLayout(note_row)
 
+        actions.addWidget(self.btn_save_note)
+        actions.addWidget(self.btn_save_gate)
+        actions.addWidget(self.btn_refresh)
+        actions.addStretch(1)
+        outer.addLayout(actions)
+
+        # --- Stream list + viewer ---
         split = QHBoxLayout()
         self.list = QListWidget()
         self.list.currentItemChanged.connect(self._on_select)
@@ -250,11 +321,11 @@ class EvidencePanel(QWidget):
 
         split.addWidget(self.list, 1)
         split.addWidget(self.viewer, 2)
-        outer.addLayout(split, 1)
+        outer.addLayout(split, 2)
 
         self.reload()
         if self.list.count() == 0:
-            self._append_note("Evidence stream initialized (Phase 2A4).")
+            self._append_note("Evidence tools initialized (Phase 2A5).")
             self.reload()
 
     def _next_ev_id(self) -> str:
@@ -266,17 +337,45 @@ class EvidencePanel(QWidget):
             ev_id=self._next_ev_id(),
             kind="NOTE",
             created_utc=utc_now_iso(),
-            summary=_safe(note)[:80] or "(note)",
+            summary=_truncate(note, 80) or "(note)",
             body=_safe(note),
         )
         self.store.append_evidence(rec)
 
-    def _on_add_note(self) -> None:
-        note = self.in_note.text()
-        self.in_note.setText("")
-        if not _safe(note):
+    def _append_gate_snapshot(self, txt: str) -> None:
+        body = _safe(txt)
+        rec = EvidenceRecord(
+            ev_id=self._next_ev_id(),
+            kind="GATE_SNAPSHOT",
+            created_utc=utc_now_iso(),
+            summary=_truncate(body.splitlines()[0] if body else "Gate Snapshot", 80),
+            body=body,
+        )
+        self.store.append_evidence(rec)
+
+    def _on_apply_template(self) -> None:
+        choice = self.tpl.currentText()
+        if choice == "Start-Day":
+            self.editor.setPlainText(_template_start_day())
+        elif choice == "Close":
+            self.editor.setPlainText(_template_close())
+        else:
+            self.editor.setPlainText(_template_note())
+
+    def _on_save_note(self) -> None:
+        txt = self.editor.toPlainText()
+        if not _safe(txt):
             return
-        self._append_note(note)
+        self._append_note(txt)
+        self.editor.setPlainText("")
+        self.reload()
+
+    def _on_save_gate(self) -> None:
+        txt = self.editor.toPlainText()
+        if not _safe(txt):
+            return
+        self._append_gate_snapshot(txt)
+        self.editor.setPlainText("")
         self.reload()
 
     def reload(self) -> None:

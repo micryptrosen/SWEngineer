@@ -34,3 +34,6 @@ Thumbs.db
 # Runtime data (do not commit)
 data/*
 !data/.gitkeep
+# Runtime / local
+.gates/
+*.pyc

@@ -1,6 +1,5 @@
 from __future__ import annotations
 from pathlib import Path
-import sys
 
 p = Path(r"C:\Dev\CCP\SWEngineer\.github\workflows\ci.yml")
 raw = p.read_text(encoding="utf-8", errors="strict")

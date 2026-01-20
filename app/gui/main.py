@@ -2,16 +2,12 @@
 SWEngineer GUI Shell (Phase 2A)
 
 - Left navigation (Task Queue / Evidence)
-- Task Queue UX stub: add mock tasks + view details (NO execution)
-- Evidence UX stub: list mock evidence entries + view details
-- No execution occurs on import (safe for tests/gates)
+- Task Queue: planner-only records (persisted JSONL)
+- Evidence: view persisted JSONL evidence (append-only)
+- No engine execution occurs in GUI.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -29,40 +25,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
-@dataclass(frozen=True)
-class TaskItem:
-    task_id: str
-    title: str
-    status: str
-    created_utc: str
-    details: str
+from .store import EvidenceRecord, GuiStore, TaskRecord, utc_now_iso
 
 
-@dataclass(frozen=True)
-class EvidenceItem:
-    ev_id: str
-    kind: str
-    created_utc: str
-    summary: str
-    body: str
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+def _safe(s: str) -> str:
+    return (s or "").strip()
 
 
 class TaskQueuePanel(QWidget):
     """
     Planner-only UI: enqueue tasks as inert records.
-    No execution, no subprocess, no file writes beyond what the system already does.
+    Persisted to data/tasks.jsonl (repo-local).
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, store: GuiStore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-
-        self._tasks: List[TaskItem] = []
-        self._seq = 0
+        self.store = store
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -72,21 +50,23 @@ class TaskQueuePanel(QWidget):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         outer.addWidget(header)
 
-        hint = QLabel("Planner-only. Tasks are inert records (no execution).")
+        hint = QLabel("Planner-only. Tasks are inert records (no execution). Persisted locally.")
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
 
-        # Input row
         row = QHBoxLayout()
         self.in_title = QLineEdit()
-        self.in_title.setPlaceholderText("Task title (e.g., 'Add button to export evidence')")
-        self.btn_add = QPushButton("Add Task (stub)")
+        self.in_title.setPlaceholderText("Task title (e.g., 'Add export evidence button')")
+        self.btn_add = QPushButton("Add Task")
         self.btn_add.clicked.connect(self._on_add_task)
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.clicked.connect(self.reload)
+
         row.addWidget(self.in_title, 1)
         row.addWidget(self.btn_add)
+        row.addWidget(self.btn_refresh)
         outer.addLayout(row)
 
-        # Main split: list + detail
         split = QHBoxLayout()
         self.list = QListWidget()
         self.list.currentItemChanged.connect(self._on_select)
@@ -98,40 +78,67 @@ class TaskQueuePanel(QWidget):
         split.addWidget(self.detail, 2)
         outer.addLayout(split, 1)
 
-        # Seed with one mock item
-        self._add_task(
-            title="Wire task planner surface (stub)",
-            details="This is a placeholder task record. Execution remains gated by core engine.",
-        )
+        self.reload()
 
-    def _add_task(self, title: str, details: str) -> None:
-        self._seq += 1
-        tid = f"T{self._seq:04d}"
-        item = TaskItem(
-            task_id=tid,
-            title=title.strip() or "(untitled)",
+        # If empty, seed one record once.
+        if self.list.count() == 0:
+            self._append_task(
+                title="Wire persistent planner surface",
+                details="Tasks are stored as JSONL records under data/tasks.jsonl. No execution.",
+            )
+            self.reload()
+
+    def _next_task_id(self, existing: list[TaskRecord]) -> str:
+        # T0001... based on existing count (simple, deterministic enough for Phase 2A)
+        return f"T{len(existing) + 1:04d}"
+
+    def _next_ev_id(self) -> str:
+        ev = self.store.read_evidence()
+        return f"E{len(ev) + 1:04d}"
+
+    def _append_task(self, title: str, details: str) -> None:
+        tasks = self.store.read_tasks()
+        rec = TaskRecord(
+            task_id=self._next_task_id(tasks),
+            title=_safe(title) or "(untitled)",
             status="PLANNED",
-            created_utc=_utc_now_iso(),
-            details=details.strip() or "",
+            created_utc=utc_now_iso(),
+            details=_safe(details),
         )
-        self._tasks.append(item)
+        self.store.append_task(rec)
 
-        lw = QListWidgetItem(f"{item.task_id}  {item.title}")
-        lw.setData(Qt.UserRole, item.task_id)
-        self.list.addItem(lw)
-        self.list.setCurrentItem(lw)
+        # Also append a small evidence note
+        ev = EvidenceRecord(
+            ev_id=self._next_ev_id(),
+            kind="UI",
+            created_utc=utc_now_iso(),
+            summary=f"Task added: {rec.task_id} {rec.title}",
+            body=f"Planner-only task record added.\n\n{rec}",
+        )
+        self.store.append_evidence(ev)
+
+    def reload(self) -> None:
+        self.list.clear()
+        tasks = self.store.read_tasks()
+        for t in tasks:
+            lw = QListWidgetItem(f"{t.task_id}  {t.title}")
+            lw.setData(Qt.UserRole, t.task_id)
+            self.list.addItem(lw)
+        if self.list.count() > 0:
+            self.list.setCurrentRow(self.list.count() - 1)
 
     def _on_add_task(self) -> None:
         title = self.in_title.text()
         self.in_title.setText("")
-        self._add_task(title=title, details="User-added task (stub). No execution performed.")
+        self._append_task(title=title, details="User-added task (planner-only).")
+        self.reload()
 
     def _on_select(self, current: QListWidgetItem | None, _prev: QListWidgetItem | None) -> None:
         if current is None:
             self.detail.setPlainText("")
             return
         tid = current.data(Qt.UserRole)
-        match = next((t for t in self._tasks if t.task_id == tid), None)
+        match = next((t for t in self.store.read_tasks() if t.task_id == tid), None)
         if match is None:
             self.detail.setPlainText("")
             return
@@ -155,13 +162,12 @@ class TaskQueuePanel(QWidget):
 
 class EvidencePanel(QWidget):
     """
-    Evidence UI stub: display evidence records. In Phase 2A this is mock data.
+    Evidence UI: reads evidence/evidence.jsonl (repo-local).
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, store: GuiStore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-
-        self._items: List[EvidenceItem] = []
+        self.store = store
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -171,9 +177,16 @@ class EvidencePanel(QWidget):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         outer.addWidget(header)
 
-        hint = QLabel("Stub view. Later: show logs/artifacts produced by gated actions.")
+        hint = QLabel("Append-only evidence stream (local). Execution remains gated elsewhere.")
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
+
+        row = QHBoxLayout()
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.clicked.connect(self.reload)
+        row.addStretch(1)
+        row.addWidget(self.btn_refresh)
+        outer.addLayout(row)
 
         split = QHBoxLayout()
         self.list = QListWidget()
@@ -186,43 +199,35 @@ class EvidencePanel(QWidget):
         split.addWidget(self.viewer, 2)
         outer.addLayout(split, 1)
 
-        self._seed()
+        self.reload()
 
-    def _seed(self) -> None:
-        self._add(
-            kind="GATE",
-            summary="tools/gates.py --mode local (GREEN)",
-            body="All checks passed.\nCI_YML_PARSE_OK\npytest: OK\n\n(Stub evidence record; no files read.)",
-        )
-        self._add(
-            kind="UI",
-            summary="GUI scaffold created (PySide6)",
-            body="Left nav + stacked panels.\nTask Queue + Evidence panes (stub).\nNo execution.",
-        )
+        if self.list.count() == 0:
+            seed = EvidenceRecord(
+                ev_id="E0001",
+                kind="GATE",
+                created_utc=utc_now_iso(),
+                summary="GUI persistence enabled (Phase 2A3)",
+                body="Evidence stream is now backed by evidence/evidence.jsonl.",
+            )
+            self.store.append_evidence(seed)
+            self.reload()
 
-    def _add(self, kind: str, summary: str, body: str) -> None:
-        ev = EvidenceItem(
-            ev_id=f"E{len(self._items)+1:04d}",
-            kind=kind,
-            created_utc=_utc_now_iso(),
-            summary=summary,
-            body=body,
-        )
-        self._items.append(ev)
-
-        lw = QListWidgetItem(f"{ev.ev_id}  [{ev.kind}]  {ev.summary}")
-        lw.setData(Qt.UserRole, ev.ev_id)
-        self.list.addItem(lw)
-
-        if self.list.count() == 1:
-            self.list.setCurrentRow(0)
+    def reload(self) -> None:
+        self.list.clear()
+        items = self.store.read_evidence()
+        for e in items:
+            lw = QListWidgetItem(f"{e.ev_id}  [{e.kind}]  {e.summary}")
+            lw.setData(Qt.UserRole, e.ev_id)
+            self.list.addItem(lw)
+        if self.list.count() > 0:
+            self.list.setCurrentRow(self.list.count() - 1)
 
     def _on_select(self, current: QListWidgetItem | None, _prev: QListWidgetItem | None) -> None:
         if current is None:
             self.viewer.setPlainText("")
             return
         ev_id = current.data(Qt.UserRole)
-        match = next((e for e in self._items if e.ev_id == ev_id), None)
+        match = next((e for e in self.store.read_evidence() if e.ev_id == ev_id), None)
         if match is None:
             self.viewer.setPlainText("")
             return
@@ -249,12 +254,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("SWEngineer — GUI Scaffold (Phase 2A)")
         self.resize(1100, 700)
 
+        self.store = GuiStore()
+
         root = QWidget(self)
         self.setCentralWidget(root)
 
         outer = QHBoxLayout(root)
 
-        # Left nav
         nav = QFrame(root)
         nav.setFrameShape(QFrame.StyledPanel)
         nav.setFixedWidth(240)
@@ -280,13 +286,12 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.btn_evidence)
         nav_layout.addStretch(1)
 
-        footer = QLabel("Execution is always gated.\n(UI is planner-only in Phase 2A.)")
+        footer = QLabel("Execution is always gated.\nGUI is planner-only in Phase 2A.")
         footer.setStyleSheet("opacity: 0.75; font-size: 11px;")
         nav_layout.addWidget(footer)
 
-        # Main content panels (manual swap via setVisible)
-        self.panel_taskq = TaskQueuePanel(root)
-        self.panel_evidence = EvidencePanel(root)
+        self.panel_taskq = TaskQueuePanel(self.store, root)
+        self.panel_evidence = EvidencePanel(self.store, root)
 
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
@@ -296,7 +301,6 @@ class MainWindow(QMainWindow):
         outer.addWidget(nav)
         outer.addLayout(content, 1)
 
-        # Wiring
         self.btn_taskq.clicked.connect(lambda: self._show("taskq"))
         self.btn_evidence.clicked.connect(lambda: self._show("evidence"))
         self._show("taskq")
@@ -304,6 +308,10 @@ class MainWindow(QMainWindow):
     def _show(self, which: str) -> None:
         self.panel_taskq.setVisible(which == "taskq")
         self.panel_evidence.setVisible(which == "evidence")
+        if which == "taskq":
+            self.panel_taskq.reload()
+        else:
+            self.panel_evidence.reload()
 
 
 def run() -> int:

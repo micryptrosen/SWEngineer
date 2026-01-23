@@ -1,0 +1,3 @@
+[submodule "vendor/swe-schemas"]
+	path = vendor/swe-schemas
+	url = https://github.com/micryptrosen/swe-schemas.git

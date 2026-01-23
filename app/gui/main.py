@@ -1,5 +1,5 @@
 """
-SWEngineer GUI Shell (Phase 2A5)
+SWEngineer GUI Shell
 
 Planner-only shell:
 - Task Queue (event-sourced, append-only)
@@ -7,6 +7,8 @@ Planner-only shell:
 - Evidence tools:
   - Paste-in Gate Snapshot (does NOT execute gates)
   - Session template helpers (Start-Day / Close / Note)
+- Planner:
+  - Generate Run Plan (does NOT execute)
 
 No engine execution.
 """
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .planner import make_run_plan, persist_run_plan
 from .store import EvidenceRecord, GuiStore, TaskEvent, utc_now_iso
 
 
@@ -47,7 +50,7 @@ def _template_start_day() -> str:
         [
             "START-DAY DECLARATION",
             "",
-            "EFFORT: SWEngineer — GUI Scaffold (Phase 2A)",
+            "EFFORT: SWEngineer — GUI Scaffold",
             "AUTHORITY: Michael A. Trosen (Operator)",
             "STATE: ACTIVE",
             "REPO: C:\\Dev\\CCP\\SWEngineer (origin: micryptrosen/SWEngineer.git)",
@@ -75,7 +78,7 @@ def _template_close() -> str:
         [
             "CLOSE DECLARATION",
             "",
-            "EFFORT: SWEngineer — GUI Scaffold (Phase 2A)",
+            "EFFORT: SWEngineer — GUI Scaffold",
             "STATE: CLOSED",
             "RESULT: PUBLISH=GREEN",
             "",
@@ -92,13 +95,7 @@ def _template_close() -> str:
 
 
 def _template_note() -> str:
-    return "\n".join(
-        [
-            "NOTE",
-            "",
-            "- (write note)",
-        ]
-    )
+    return "\n".join(["NOTE", "", "- (write note)"])
 
 
 class TaskQueuePanel(QWidget):
@@ -125,12 +122,15 @@ class TaskQueuePanel(QWidget):
         self.btn_add.clicked.connect(self._on_add_task)
         self.btn_done = QPushButton("Mark Done")
         self.btn_done.clicked.connect(self._on_mark_done)
+        self.btn_plan = QPushButton("Generate Run Plan")
+        self.btn_plan.clicked.connect(self._on_generate_plan)
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self.reload)
 
         row.addWidget(self.in_title, 1)
         row.addWidget(self.btn_add)
         row.addWidget(self.btn_done)
+        row.addWidget(self.btn_plan)
         row.addWidget(self.btn_refresh)
         outer.addLayout(row)
 
@@ -148,8 +148,7 @@ class TaskQueuePanel(QWidget):
         self.reload()
         if self.list.count() == 0:
             self._append_create(
-                "Try Gate Snapshot paste-in",
-                "Use Evidence pane tools to log gates without execution.",
+                "Generate a Run Plan", "Select a task and click Generate Run Plan (no execution)."
             )
             self.reload()
 
@@ -230,12 +229,21 @@ class TaskQueuePanel(QWidget):
 
     def _on_mark_done(self) -> None:
         t = self._selected_task()
-        if t is None:
-            return
-        if t.status == "DONE":
+        if t is None or t.status == "DONE":
             return
         self._append_status(t.task_id, t.title, "DONE", "Marked DONE in GUI (planner-only).")
         self.reload()
+
+    def _on_generate_plan(self) -> None:
+        t = self._selected_task()
+        if t is None:
+            return
+        plan = make_run_plan(t.task_id, t.title, notes=t.details)
+        persist_run_plan(self.store, plan)
+        # Refresh task detail to hint where it went
+        self.detail.setPlainText(
+            self.detail.toPlainText() + "\n\nRun Plan saved to Evidence (kind=RUN_PLAN)."
+        )
 
     def _on_select(self, current: QListWidgetItem | None, _prev: QListWidgetItem | None) -> None:
         if current is None:
@@ -280,7 +288,6 @@ class EvidencePanel(QWidget):
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
 
-        # --- Templates row ---
         tpl_row = QHBoxLayout()
         tpl_row.addWidget(QLabel("Template:"))
         self.tpl = QComboBox()
@@ -292,7 +299,6 @@ class EvidencePanel(QWidget):
         tpl_row.addStretch(1)
         outer.addLayout(tpl_row)
 
-        # --- Editor + actions ---
         self.editor = QTextEdit()
         self.editor.setPlaceholderText("Write a note, or paste gate output below…")
         outer.addWidget(self.editor, 1)
@@ -311,7 +317,6 @@ class EvidencePanel(QWidget):
         actions.addStretch(1)
         outer.addLayout(actions)
 
-        # --- Stream list + viewer ---
         split = QHBoxLayout()
         self.list = QListWidget()
         self.list.currentItemChanged.connect(self._on_select)
@@ -325,7 +330,7 @@ class EvidencePanel(QWidget):
 
         self.reload()
         if self.list.count() == 0:
-            self._append_note("Evidence tools initialized (Phase 2A5).")
+            self._append_note("Evidence tools initialized.")
             self.reload()
 
     def _next_ev_id(self) -> str:
@@ -417,7 +422,7 @@ class EvidencePanel(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("SWEngineer — GUI Scaffold (Phase 2A)")
+        self.setWindowTitle("SWEngineer — GUI Scaffold")
         self.resize(1100, 700)
 
         self.store = GuiStore()
@@ -439,7 +444,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         nav_layout.addWidget(title)
 
-        subtitle = QLabel("Phase 2A — Scaffold")
+        subtitle = QLabel("Planner-only (Phase 2B)")
         subtitle.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         subtitle.setStyleSheet("opacity: 0.8;")
         nav_layout.addWidget(subtitle)
@@ -452,7 +457,7 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.btn_evidence)
         nav_layout.addStretch(1)
 
-        footer = QLabel("Execution is always gated.\nGUI is planner-only in Phase 2A.")
+        footer = QLabel("Execution is always gated.\nGUI never executes commands.")
         footer.setStyleSheet("opacity: 0.75; font-size: 11px;")
         nav_layout.addWidget(footer)
 

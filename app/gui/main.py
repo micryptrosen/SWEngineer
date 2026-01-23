@@ -9,6 +9,7 @@ Planner-only shell:
   - Session template helpers (Start-Day / Close / Note)
 - Planner:
   - Generate Run Plan (does NOT execute)
+  - Approve Run Plan (human sign-off; does NOT execute)
 
 No engine execution.
 """
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .planner import make_run_plan, persist_run_plan
+from .planner import make_approval, make_run_plan, persist_approval, persist_run_plan
 from .store import EvidenceRecord, GuiStore, TaskEvent, utc_now_iso
 
 
@@ -148,7 +149,7 @@ class TaskQueuePanel(QWidget):
         self.reload()
         if self.list.count() == 0:
             self._append_create(
-                "Generate a Run Plan", "Select a task and click Generate Run Plan (no execution)."
+                "Approve a Run Plan", "Create a run plan, then approve it in Evidence."
             )
             self.reload()
 
@@ -240,7 +241,6 @@ class TaskQueuePanel(QWidget):
             return
         plan = make_run_plan(t.task_id, t.title, notes=t.details)
         persist_run_plan(self.store, plan)
-        # Refresh task detail to hint where it went
         self.detail.setPlainText(
             self.detail.toPlainText() + "\n\nRun Plan saved to Evidence (kind=RUN_PLAN)."
         )
@@ -284,7 +284,9 @@ class EvidencePanel(QWidget):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         outer.addWidget(header)
 
-        hint = QLabel("Append-only evidence stream (local). Paste-in snapshots; no execution.")
+        hint = QLabel(
+            "Append-only evidence stream (local). Paste-in snapshots; approvals are human-only."
+        )
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
 
@@ -298,6 +300,20 @@ class EvidencePanel(QWidget):
         tpl_row.addWidget(self.btn_apply_tpl)
         tpl_row.addStretch(1)
         outer.addLayout(tpl_row)
+
+        # Approval controls
+        appr = QHBoxLayout()
+        self.in_reviewer = QLineEdit()
+        self.in_reviewer.setPlaceholderText("Reviewer name…")
+        self.sel_decision = QComboBox()
+        self.sel_decision.addItems(["APPROVED", "REJECTED"])
+        self.btn_approve = QPushButton("Approve Selected RUN_PLAN")
+        self.btn_approve.clicked.connect(self._on_approve_selected_plan)
+        appr.addWidget(QLabel("Approval:"))
+        appr.addWidget(self.in_reviewer, 1)
+        appr.addWidget(self.sel_decision)
+        appr.addWidget(self.btn_approve)
+        outer.addLayout(appr)
 
         self.editor = QTextEdit()
         self.editor.setPlaceholderText("Write a note, or paste gate output below…")
@@ -380,6 +396,29 @@ class EvidencePanel(QWidget):
         if not _safe(txt):
             return
         self._append_gate_snapshot(txt)
+        self.editor.setPlainText("")
+        self.reload()
+
+    def _selected_evidence(self) -> EvidenceRecord | None:
+        cur = self.list.currentItem()
+        if cur is None:
+            return None
+        ev_id = cur.data(Qt.UserRole)
+        match = next((e for e in self.store.read_evidence() if e.ev_id == ev_id), None)
+        return match
+
+    def _on_approve_selected_plan(self) -> None:
+        sel = self._selected_evidence()
+        if sel is None or sel.kind != "RUN_PLAN":
+            # Only RUN_PLAN can be approved
+            return
+        reviewer = _safe(self.in_reviewer.text())
+        if not reviewer:
+            reviewer = "UNKNOWN"
+        decision = self.sel_decision.currentText()
+        notes = self.editor.toPlainText()
+        appr = make_approval(sel.ev_id, reviewer, decision, notes)
+        persist_approval(self.store, appr)
         self.editor.setPlainText("")
         self.reload()
 

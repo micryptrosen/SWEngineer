@@ -1,18 +1,16 @@
 """
-SWEngineer GUI Shell
+SWEngineer GUI Shell (Planner-only)
 
-Planner-only shell:
+Capabilities:
 - Task Queue (event-sourced, append-only)
 - Evidence stream (append-only)
-- Evidence tools:
-  - Paste-in Gate Snapshot (does NOT execute gates)
-  - Session template helpers (Start-Day / Close / Note)
-- Planner:
-  - Generate Run Plan (does NOT execute)
-  - Approve Run Plan (human sign-off; does NOT execute)
-  - Clone Run Plan (creates new plan that supersedes prior; append-only marker)
+- Run Plans (inert)
+- Approvals (human sign-off, inert)
+- Clone/Supersede lifecycle (inert)
+- RUN_HANDOFF (machine-readable inert handoff with sha256)
 
 No engine execution.
+GUI never executes commands.
 """
 
 from __future__ import annotations
@@ -40,6 +38,7 @@ from .planner import (
     make_run_plan,
     make_superseded,
     persist_approval,
+    persist_handoff_from_plan,
     persist_run_plan,
     persist_superseded,
 )
@@ -158,7 +157,7 @@ class TaskQueuePanel(QWidget):
         self.reload()
         if self.list.count() == 0:
             self._append_create(
-                "Clone a Run Plan", "Create a run plan, then clone/supersede it in Evidence."
+                "Generate a RUN_HANDOFF", "Approve a plan, then generate RUN_HANDOFF in Evidence."
             )
             self.reload()
 
@@ -293,9 +292,7 @@ class EvidencePanel(QWidget):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         outer.addWidget(header)
 
-        hint = QLabel(
-            "Append-only evidence stream (local). Approvals and supersedes are human-only."
-        )
+        hint = QLabel("Append-only evidence stream. RUN_HANDOFF is inert and sha256-stamped.")
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
 
@@ -310,6 +307,7 @@ class EvidencePanel(QWidget):
         tpl_row.addStretch(1)
         outer.addLayout(tpl_row)
 
+        # Approval controls
         appr = QHBoxLayout()
         self.in_reviewer = QLineEdit()
         self.in_reviewer.setPlaceholderText("Reviewer name…")
@@ -323,6 +321,7 @@ class EvidencePanel(QWidget):
         appr.addWidget(self.btn_approve)
         outer.addLayout(appr)
 
+        # Clone/Supersede
         clone_row = QHBoxLayout()
         self.btn_clone = QPushButton("Clone Selected RUN_PLAN (supersede)")
         self.btn_clone.clicked.connect(self._on_clone_selected_plan)
@@ -330,9 +329,22 @@ class EvidencePanel(QWidget):
         clone_row.addStretch(1)
         outer.addLayout(clone_row)
 
+        # Handoff controls
+        handoff_row = QHBoxLayout()
+        self.in_runner = QLineEdit()
+        self.in_runner.setPlaceholderText(
+            "Runner label (e.g., NovaForge15-Runner / CI / External)…"
+        )
+        self.btn_handoff = QPushButton("Generate RUN_HANDOFF from Approved RUN_PLAN")
+        self.btn_handoff.clicked.connect(self._on_handoff_selected_plan)
+        handoff_row.addWidget(QLabel("Handoff:"))
+        handoff_row.addWidget(self.in_runner, 1)
+        handoff_row.addWidget(self.btn_handoff)
+        outer.addLayout(handoff_row)
+
         self.editor = QTextEdit()
         self.editor.setPlaceholderText(
-            "Write notes (or paste gate output). For Clone: paste new notes here."
+            "Notes. For Clone: new plan notes. For Handoff: handoff notes."
         )
         outer.addWidget(self.editor, 1)
 
@@ -445,6 +457,19 @@ class EvidencePanel(QWidget):
             sel.ev_id, new_plan.ev_id, reason="Cloned in GUI; prior plan superseded."
         )
         persist_superseded(self.store, marker)
+        self.editor.setPlainText("")
+        self.reload()
+
+    def _on_handoff_selected_plan(self) -> None:
+        sel = self._selected_evidence()
+        if sel is None or sel.kind != "RUN_PLAN":
+            return
+        runner = _safe(self.in_runner.text())
+        notes = self.editor.toPlainText()
+        try:
+            persist_handoff_from_plan(self.store, sel, runner_label=runner, notes=notes)
+        except Exception as exc:
+            self._append_note(f"RUN_HANDOFF_FAILED: {exc}")
         self.editor.setPlainText("")
         self.reload()
 

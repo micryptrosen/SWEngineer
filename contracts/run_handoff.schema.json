@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RUN_HANDOFF Contract",
+  "type": "object",
+  "required": [
+    "contract",
+    "created_utc",
+    "plan_ev_id",
+    "approval_ev_id",
+    "runner_label",
+    "required_gates",
+    "commands",
+    "statements",
+    "payload_sha256"
+  ],
+  "properties": {
+    "contract": { "const": "run_handoff/1.0" },
+    "created_utc": { "type": "string", "format": "date-time" },
+    "plan_ev_id": { "type": "string" },
+    "approval_ev_id": { "type": "string" },
+    "runner_label": { "type": "string" },
+    "required_gates": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "statements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": { "type": "string" },
+    "payload_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

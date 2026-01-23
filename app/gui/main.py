@@ -10,6 +10,7 @@ Planner-only shell:
 - Planner:
   - Generate Run Plan (does NOT execute)
   - Approve Run Plan (human sign-off; does NOT execute)
+  - Clone Run Plan (creates new plan that supersedes prior; append-only marker)
 
 No engine execution.
 """
@@ -33,7 +34,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .planner import make_approval, make_run_plan, persist_approval, persist_run_plan
+from .planner import (
+    clone_run_plan,
+    make_approval,
+    make_run_plan,
+    make_superseded,
+    persist_approval,
+    persist_run_plan,
+    persist_superseded,
+)
 from .store import EvidenceRecord, GuiStore, TaskEvent, utc_now_iso
 
 
@@ -149,7 +158,7 @@ class TaskQueuePanel(QWidget):
         self.reload()
         if self.list.count() == 0:
             self._append_create(
-                "Approve a Run Plan", "Create a run plan, then approve it in Evidence."
+                "Clone a Run Plan", "Create a run plan, then clone/supersede it in Evidence."
             )
             self.reload()
 
@@ -285,7 +294,7 @@ class EvidencePanel(QWidget):
         outer.addWidget(header)
 
         hint = QLabel(
-            "Append-only evidence stream (local). Paste-in snapshots; approvals are human-only."
+            "Append-only evidence stream (local). Approvals and supersedes are human-only."
         )
         hint.setStyleSheet("opacity: 0.85;")
         outer.addWidget(hint)
@@ -301,7 +310,6 @@ class EvidencePanel(QWidget):
         tpl_row.addStretch(1)
         outer.addLayout(tpl_row)
 
-        # Approval controls
         appr = QHBoxLayout()
         self.in_reviewer = QLineEdit()
         self.in_reviewer.setPlaceholderText("Reviewer name…")
@@ -315,8 +323,17 @@ class EvidencePanel(QWidget):
         appr.addWidget(self.btn_approve)
         outer.addLayout(appr)
 
+        clone_row = QHBoxLayout()
+        self.btn_clone = QPushButton("Clone Selected RUN_PLAN (supersede)")
+        self.btn_clone.clicked.connect(self._on_clone_selected_plan)
+        clone_row.addWidget(self.btn_clone)
+        clone_row.addStretch(1)
+        outer.addLayout(clone_row)
+
         self.editor = QTextEdit()
-        self.editor.setPlaceholderText("Write a note, or paste gate output below…")
+        self.editor.setPlaceholderText(
+            "Write notes (or paste gate output). For Clone: paste new notes here."
+        )
         outer.addWidget(self.editor, 1)
 
         actions = QHBoxLayout()
@@ -404,21 +421,30 @@ class EvidencePanel(QWidget):
         if cur is None:
             return None
         ev_id = cur.data(Qt.UserRole)
-        match = next((e for e in self.store.read_evidence() if e.ev_id == ev_id), None)
-        return match
+        return next((e for e in self.store.read_evidence() if e.ev_id == ev_id), None)
 
     def _on_approve_selected_plan(self) -> None:
         sel = self._selected_evidence()
         if sel is None or sel.kind != "RUN_PLAN":
-            # Only RUN_PLAN can be approved
             return
-        reviewer = _safe(self.in_reviewer.text())
-        if not reviewer:
-            reviewer = "UNKNOWN"
+        reviewer = _safe(self.in_reviewer.text()) or "UNKNOWN"
         decision = self.sel_decision.currentText()
         notes = self.editor.toPlainText()
         appr = make_approval(sel.ev_id, reviewer, decision, notes)
         persist_approval(self.store, appr)
+        self.editor.setPlainText("")
+        self.reload()
+
+    def _on_clone_selected_plan(self) -> None:
+        sel = self._selected_evidence()
+        if sel is None or sel.kind != "RUN_PLAN":
+            return
+        new_notes = self.editor.toPlainText()
+        new_plan = clone_run_plan(self.store, sel, new_notes=new_notes)
+        marker = make_superseded(
+            sel.ev_id, new_plan.ev_id, reason="Cloned in GUI; prior plan superseded."
+        )
+        persist_superseded(self.store, marker)
         self.editor.setPlainText("")
         self.reload()
 

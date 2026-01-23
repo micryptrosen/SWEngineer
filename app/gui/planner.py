@@ -2,18 +2,19 @@
 Planner (Phase 2B)
 
 Produces inert run plans (no execution).
-Writes plans + approvals as evidence records.
+Writes plans + approvals + lifecycle markers as evidence records.
 
 Evidence kinds:
 - RUN_PLAN
 - RUN_PLAN_APPROVAL
+- RUN_PLAN_SUPERSEDED
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from typing import List
+from typing import List, Optional
 
 from .store import EvidenceRecord, GuiStore, utc_now_iso
 
@@ -29,6 +30,7 @@ class RunPlan:
     required_gates: List[str]
     risk_flags: List[str]
     notes: str
+    supersedes_plan_ev_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,15 @@ class RunPlanApproval:
     reviewer: str
     decision: str  # APPROVED | REJECTED
     notes: str
+
+
+@dataclass(frozen=True)
+class RunPlanSuperseded:
+    contract: str
+    created_utc: str
+    prior_plan_ev_id: str
+    new_plan_ev_id: str
+    reason: str
 
 
 def make_run_plan(task_id: str, task_title: str, notes: str) -> RunPlan:
@@ -61,12 +72,17 @@ def make_run_plan(task_id: str, task_title: str, notes: str) -> RunPlan:
             "HUMAN_REVIEW_REQUIRED",
         ],
         notes=(notes or "").strip(),
+        supersedes_plan_ev_id=None,
     )
 
 
 def persist_run_plan(store: GuiStore, plan: RunPlan) -> EvidenceRecord:
     payload = json.dumps(asdict(plan), ensure_ascii=False, sort_keys=True, indent=2)
     summary = f"RUN_PLAN {plan.task_id}: {plan.task_title}"
+    if plan.supersedes_plan_ev_id:
+        summary = (
+            f"RUN_PLAN {plan.task_id}: {plan.task_title} (supersedes {plan.supersedes_plan_ev_id})"
+        )
     rec = EvidenceRecord(
         ev_id=f"E{len(store.read_evidence()) + 1:04d}",
         kind="RUN_PLAN",
@@ -76,6 +92,37 @@ def persist_run_plan(store: GuiStore, plan: RunPlan) -> EvidenceRecord:
     )
     store.append_evidence(rec)
     return rec
+
+
+def clone_run_plan(
+    store: GuiStore, prior_plan_rec: EvidenceRecord, new_notes: str
+) -> EvidenceRecord:
+    # Parse prior plan JSON body; fall back to minimal if parse fails.
+    prior = {}
+    try:
+        prior = json.loads(prior_plan_rec.body or "{}")
+    except Exception:
+        prior = {}
+    task_id = str(prior.get("task_id") or "T0000")
+    task_title = str(prior.get("task_title") or "unknown")
+    objective = str(prior.get("objective") or f"Plan changes for task {task_id}: {task_title}")
+    commands = prior.get("commands") or []
+    required_gates = prior.get("required_gates") or ["py tools\\gates.py --mode local"]
+    risk_flags = prior.get("risk_flags") or ["NO_EXECUTION_FROM_GUI", "HUMAN_REVIEW_REQUIRED"]
+
+    plan = RunPlan(
+        contract="runplan/1.0",
+        created_utc=utc_now_iso(),
+        task_id=task_id,
+        task_title=task_title,
+        objective=objective,
+        commands=list(commands),
+        required_gates=list(required_gates),
+        risk_flags=list(risk_flags),
+        notes=(new_notes or "").strip(),
+        supersedes_plan_ev_id=prior_plan_rec.ev_id,
+    )
+    return persist_run_plan(store, plan)
 
 
 def make_approval(plan_ev_id: str, reviewer: str, decision: str, notes: str) -> RunPlanApproval:
@@ -98,6 +145,30 @@ def persist_approval(store: GuiStore, approval: RunPlanApproval) -> EvidenceReco
     rec = EvidenceRecord(
         ev_id=f"E{len(store.read_evidence()) + 1:04d}",
         kind="RUN_PLAN_APPROVAL",
+        created_utc=utc_now_iso(),
+        summary=summary[:80],
+        body=payload,
+    )
+    store.append_evidence(rec)
+    return rec
+
+
+def make_superseded(prior_plan_ev_id: str, new_plan_ev_id: str, reason: str) -> RunPlanSuperseded:
+    return RunPlanSuperseded(
+        contract="runplan_superseded/1.0",
+        created_utc=utc_now_iso(),
+        prior_plan_ev_id=prior_plan_ev_id,
+        new_plan_ev_id=new_plan_ev_id,
+        reason=(reason or "").strip(),
+    )
+
+
+def persist_superseded(store: GuiStore, marker: RunPlanSuperseded) -> EvidenceRecord:
+    payload = json.dumps(asdict(marker), ensure_ascii=False, sort_keys=True, indent=2)
+    summary = f"RUN_PLAN_SUPERSEDED {marker.prior_plan_ev_id} -> {marker.new_plan_ev_id}"
+    rec = EvidenceRecord(
+        ev_id=f"E{len(store.read_evidence()) + 1:04d}",
+        kind="RUN_PLAN_SUPERSEDED",
         created_utc=utc_now_iso(),
         summary=summary[:80],
         body=payload,

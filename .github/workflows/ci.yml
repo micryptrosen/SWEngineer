@@ -1,40 +1,22 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+  gates:
+    runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
 
-      - name: Install dependencies
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          test -f requirements.txt || (echo "Missing requirements.txt" && exit 1)
-          test -f requirements-dev.txt || (echo "Missing requirements-dev.txt" && exit 1)
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Gates (single source of truth)
-        shell: bash
-        run: |
-          python tools/gates.py --mode ci
+      - name: Gates (authoritative)
+        run: python tools/gates.py --mode ci

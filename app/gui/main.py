@@ -14,6 +14,9 @@ GUI never executes commands.
 """
 
 from __future__ import annotations
+import swe_bootstrap as _swe_bootstrap
+_swe_bootstrap.apply()
+
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (

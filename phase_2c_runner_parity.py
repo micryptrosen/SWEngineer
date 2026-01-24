@@ -1,4 +1,7 @@
 from __future__ import annotations
+import swe_bootstrap as _swe_bootstrap
+_swe_bootstrap.apply()
+
 
 import json
 import re

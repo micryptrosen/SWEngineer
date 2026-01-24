@@ -1,26 +1,30 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.schema_locator import resolve_schema_root
 
+
 class SchemaValidationError(RuntimeError):
     pass
+
 
 def _iter_json_files(root: Path) -> list[Path]:
     out: list[Path] = []
     for p in root.rglob("*.json"):
-        # ignore tooling / hidden dirs
         s = str(p).replace("\\", "/")
         if "/.git/" in s or "/__pycache__/" in s:
             continue
         out.append(p)
     return out
 
+
 def _normalize_contract(contract: str) -> str:
     return contract.strip().lower()
+
 
 def find_schema_for_contract(contract: str, schema_root: Optional[Path] = None) -> Path:
     """
@@ -60,9 +64,9 @@ def find_schema_for_contract(contract: str, schema_root: Optional[Path] = None) 
     if not candidates:
         raise SchemaValidationError(f"no schema found for contract='{contract}' under {root}")
 
-    # Prefer shortest path (most specific)
     candidates.sort(key=lambda p: (len(str(p)), str(p)))
     return candidates[0]
+
 
 def validate_payload(payload: Dict[str, Any], schema_root: Optional[Path] = None) -> None:
     """
@@ -84,4 +88,6 @@ def validate_payload(payload: Dict[str, Any], schema_root: Optional[Path] = None
     try:
         jsonschema.validate(instance=payload, schema=schema)
     except Exception as e:
-        raise SchemaValidationError(f"schema validation failed for contract='{contract}' schema='{schema_path}'") from e
+        raise SchemaValidationError(
+            f"schema validation failed for contract='{contract}' schema='{schema_path}'"
+        ) from e

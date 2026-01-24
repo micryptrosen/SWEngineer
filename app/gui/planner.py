@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from app.validation.canonical import canonical_json, sha256_hex
+
 from dataclasses import asdict, dataclass
 from typing import List, Optional
 
@@ -252,7 +254,7 @@ def persist_handoff_from_plan(
         "notes": (notes or "").strip(),
     }
 
-    sha = _sha256_hex(_canonical_json(payload_no_sha))
+    sha = sha256_hex(canonical_json(payload_no_sha))
 
     handoff = RunHandoff(
         contract=payload_no_sha["contract"],

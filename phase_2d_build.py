@@ -34,7 +34,7 @@ def patch_pyproject_exclude_vendor(pyproject: Path) -> bool:
         # Ensure exclude includes "vendor"
         # Prefer TOML array form: exclude = ["vendor", ...]
         # If exclude already mentions vendor, do nothing.
-        if re.search(r'^\s*exclude\s*=\s*\[[^\]]*("vendor"|''vendor'')[^\]]*\]\s*$', t, flags=re.M):
+        if re.search(r"^\s*exclude\s*=\s*\[[^\]]*(\"vendor\"|'vendor')[^\]]*\]\s*$", t, flags=re.M):
             return t
         # If exclude exists, append vendor; otherwise insert exclude.
         m = re.search(r'^\s*exclude\s*=\s*\[(.*?)\]\s*$', t, flags=re.M)

@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from typing import List, Optional
 
 from .store import EvidenceRecord, GuiStore, utc_now_iso
+from app.validation.schema_validation import validate_payload
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,7 @@ def persist_handoff_from_plan(
         ],
         "notes": (notes or "").strip(),
     }
+    validate_payload(payload_no_sha)
     sha = _sha256_hex(_canonical_json(payload_no_sha))
 
     handoff = RunHandoff(

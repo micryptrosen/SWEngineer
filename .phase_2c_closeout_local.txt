@@ -1,0 +1,14 @@
+PHASE_2C_CLOSED=YES
+DATE_UTC=01/23/2026 17:33:04.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+TAG=v0.2.16-phase2c_20260123_173144
+HEAD=587f31f66ff277d81a7de5a70deff4ea6bc713f0
+
+RESULTS
+- SWEngineer schema root default = vendor/swe-schemas (submodule pinned)
+- Runner-parity schema validation active
+- RUN_HANDOFF validated only after payload_sha256 exists
+
+NEXT (PHASE 2D)
+- Add negative tests: missing/invalid payload_sha256 must fail
+- Add cross-check: GUI-produced handoff validates under swe-runner resolver
+- Verify vendor/ excluded from SWEngineer lint (submodules validated in their repos)

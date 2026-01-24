@@ -11,14 +11,22 @@ TARGETS = [
     Path("phase_2c_chain_hardening.py"),
 ]
 
-def test_entrypoints_call_swe_bootstrap_apply():
+REQUIRED_SNIPPETS = [
+    "def _swe_find_repo_root",
+    "_SRC = _REPO / 'src'",
+    "_VENDOR = _REPO / 'vendor' / 'swe-schemas'",
+    "import swe_bootstrap as _swe_bootstrap",
+    "_swe_bootstrap.apply()",
+]
+
+def test_entrypoints_have_script_safe_bootstrap():
     missing = []
     for rel in TARGETS:
         p = REPO / rel
         if not p.exists():
             continue
         t = p.read_text(encoding="utf-8", errors="ignore")
-        ok = ("import swe_bootstrap as _swe_bootstrap" in t) and ("_swe_bootstrap.apply()" in t)
+        ok = all(s in t for s in REQUIRED_SNIPPETS)
         if not ok:
             missing.append(str(rel).replace("\\", "/"))
-    assert not missing, "Missing bootstrap wiring in: " + ", ".join(missing)
+    assert not missing, "EntryPoint bootstrap not script-safe in: " + ", ".join(missing)

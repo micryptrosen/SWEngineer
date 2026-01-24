@@ -1,6 +1,27 @@
 from __future__ import annotations
+from pathlib import Path as _Path
+import sys as _sys
+
+def _swe_find_repo_root(_start: _Path) -> _Path:
+    p = _start.resolve()
+    for _ in range(8):
+        if (p / 'src').exists() and (p / 'vendor').exists():
+            return p
+        if p.parent == p:
+            break
+        p = p.parent
+    return _start.resolve().parents[0]
+
+_REPO = _swe_find_repo_root(_Path(__file__).resolve())
+_SRC = _REPO / 'src'
+_VENDOR = _REPO / 'vendor' / 'swe-schemas'
+for _p in (str(_VENDOR), str(_SRC)):
+    if _p and _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
 import swe_bootstrap as _swe_bootstrap
 _swe_bootstrap.apply()
+
 
 
 import os

@@ -251,7 +251,7 @@ def persist_handoff_from_plan(
         ],
         "notes": (notes or "").strip(),
     }
-    # validate_payload(payload_no_sha)  # deferred: schema requires payload_sha256
+
     sha = _sha256_hex(_canonical_json(payload_no_sha))
 
     handoff = RunHandoff(
@@ -265,8 +265,10 @@ def persist_handoff_from_plan(
         statements=payload_no_sha["statements"],
         notes=payload_no_sha["notes"],
         payload_sha256=sha,
-        validate_payload(asdict(handoff))
     )
+
+    # Validate final handoff payload (includes payload_sha256)
+    validate_payload(asdict(handoff))
 
     payload = json.dumps(asdict(handoff), ensure_ascii=False, sort_keys=True, indent=2)
     summary = f"RUN_HANDOFF {plan_rec.ev_id} -> {handoff.runner_label}"
@@ -279,3 +281,5 @@ def persist_handoff_from_plan(
     )
     store.append_evidence(rec)
     return rec
+
+

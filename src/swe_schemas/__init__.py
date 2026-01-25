@@ -14,6 +14,7 @@ Contract:
 - No runtime side effects beyond import aliasing
 """
 from __future__ import annotations
+from pathlib import Path
 
 import importlib
 import sys
@@ -34,3 +35,15 @@ def __dir__():
 __path__ = getattr(_real, "__path__", None)  # type: ignore[assignment]
 __all__ = getattr(_real, "__all__", [])
 sys.modules.setdefault("swe_schemas", sys.modules[__name__])
+
+# --- Phase 3 Step 3D: required public API ---
+def resolve_schema_root(schema_root=None) -> Path:
+    """Return the canonical schema root.
+
+    Default: vendor-backed schemas at vendor/swe-schemas.
+    Optional override: a caller-supplied path.
+    """
+    if schema_root is not None:
+        return Path(schema_root)
+    return Path(r"C:\Dev\CCP\SWEngineer") / "vendor" / "swe-schemas"
+

@@ -7,10 +7,16 @@ Contract:
 """
 
 from __future__ import annotations
+import swe_schemas as swe_schemas
 
 # Canonical plumbing bind (do not remove)
 import swe_schemas as swe_schemas  # noqa: F401
-from swe_schemas import resolve_schema_root as resolve_schema_root  # noqa: F401
+
+
+def resolve_schema_root() -> str:
+    """Call-time schema root resolution (Phase 3 / Step 3M)."""
+    return swe_schemas.resolve_schema_root()
+
 
 __all__ = [
     "resolve_schema_root",

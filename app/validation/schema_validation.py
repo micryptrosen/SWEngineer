@@ -91,3 +91,23 @@ def validate_payload(payload: Dict[str, Any], schema_root: Optional[Path] = None
         raise SchemaValidationError(
             f"schema validation failed for contract='{contract}' schema='{schema_path}'"
         ) from e
+
+# === PHASE3_STEP3H_OVERRIDE_RESOLVE_SCHEMA_ROOT ===
+
+# Phase 3 hardening:
+# - resolve schema root from swe_schemas.resolve_schema_root() at call-time
+# - raise if the resolved path does not exist (no silent fallback)
+
+def resolve_schema_root(schema_root=None):  # type: ignore[override]
+    from pathlib import Path
+    import swe_schemas  # call-time import to honor bootstrap + monkeypatch in tests
+
+    if schema_root is not None:
+        p = Path(schema_root)
+    else:
+        p = Path(swe_schemas.resolve_schema_root())
+
+    if not p.exists():
+        raise SchemaValidationError(f"schema_root does not exist: {p}")
+    return p
+

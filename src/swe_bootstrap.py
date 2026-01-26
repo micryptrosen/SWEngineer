@@ -1,42 +1,62 @@
 from __future__ import annotations
 
-import sys
+"""
+swe_bootstrap
+Phase 3 contract:
+- Import-safe (no import-time side effects beyond defining functions)
+- apply() must make repo-local imports deterministic, including:
+  - src/*
+  - app/* (GUI + validation package tree)
+  - vendor/swe-schemas (canonical schemas)
+"""
+
 from pathlib import Path
+import sys
+
+
+def _ins(p: Path) -> None:
+    s = str(p)
+    if p.exists() and s not in sys.path:
+        sys.path.insert(0, s)
+
 
 def _find_repo_root(start: Path) -> Path:
+    """
+    Walk upward to find the repository root using stable markers.
+    """
     cur = start.resolve()
-    for _ in range(15):
+    for _ in range(12):
         if (cur / ".git").exists():
             return cur
-        cur = cur.parent
-    return start.resolve()
+        if (cur / "requirements-dev.txt").exists():
+            return cur
+        if (cur / "pyproject.toml").exists():
+            return cur
+        if (cur / "src").exists() and (cur / "vendor").exists():
+            return cur
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    # Fallback: assume typical layout (repo/src/...)
+    return start.resolve().parents[1]
 
-def apply(repo_root: str | None = None) -> None:
+
+def apply() -> None:
     """
-    Deterministic bootstrap for SWEngineer.
+    Deterministically inject required paths for SWEngineer runtime imports.
 
-    Purpose:
-      - Ensure vendored swe-schemas import root (`schemas`) is discoverable
-      - Ensure local src/ is discoverable
-      - Provide stable environment for both swe-runner and GUI/planner validation
-
-    Contract:
-      - Must be safe to call multiple times
-      - Must NOT write files
-      - Must only mutate sys.path in a minimal, deterministic way
+    Under isolated (-I) mode, tests inject ONLY repo/src before importing swe_bootstrap.
+    Therefore apply() must expand sys.path to include:
+      - repo root
+      - repo/src
+      - repo/app
+      - repo/vendor/swe-schemas
     """
-    root = Path(repo_root) if repo_root else _find_repo_root(Path.cwd())
+    here = Path(__file__).resolve()
+    repo = _find_repo_root(here)
 
-    vendor_swe_schemas = root / "vendor" / "swe-schemas"
-    src = root / "src"
-
-    # Priority order: vendor first, then src
-    inserts = []
-    if vendor_swe_schemas.exists():
-        inserts.append(str(vendor_swe_schemas))
-    if src.exists():
-        inserts.append(str(src))
-
-    for p in reversed(inserts):
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    _ins(repo)
+    _ins(repo / "src")
+    _ins(repo / "app")
+    _ins(repo / "vendor" / "swe-schemas")

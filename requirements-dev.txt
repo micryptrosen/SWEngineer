@@ -1,5 +1,2 @@
-pytest>=8.2
-ruff>=0.6
-black>=24.4
-mypy>=1.10
-pyinstaller>=6.7
+# SWEngineer dev/test deps (Phase 3 contract)
+jsonschema>=4.0.0

@@ -1,113 +1,175 @@
+"""
+Schema validation entrypoint (Phase 3 hardening).
+
+LOCKED CONTRACTS:
+- Vendor schema root is canonical: swe_schemas.resolve_schema_root() -> vendor/swe-schemas
+- No silent fallback if vendor schemas are missing
+- Public API (stable; used throughout app/tests):
+    - SchemaValidationError
+    - resolve_schema_root(schema_root: str | None) -> str
+    - validate_payload(payload: dict, schema_root: str | None = None) -> None
+"""
+
 from __future__ import annotations
 
-import json
-import re
+from dataclasses import is_dataclass, asdict
 from pathlib import Path
-from typing import Any, Dict, Optional
+import json
+from typing import Any, Optional
 
-from app.schema_locator import resolve_schema_root
+# Canonical plumbing bind (do not remove)
+import swe_schemas as swe_schemas  # noqa: F401
+
+import jsonschema
 
 
-class SchemaValidationError(RuntimeError):
+class SchemaValidationError(ValueError):
     pass
 
 
-def _iter_json_files(root: Path) -> list[Path]:
-    out: list[Path] = []
-    for p in root.rglob("*.json"):
-        s = str(p).replace("\\", "/")
-        if "/.git/" in s or "/__pycache__/" in s:
-            continue
-        out.append(p)
+def resolve_schema_root(schema_root: Optional[str] = None) -> str:
+    """
+    Public API (stable):
+    - If schema_root is provided, it is used (and must exist).
+    - If schema_root is None, uses canonical swe_schemas.resolve_schema_root().
+    - MUST raise SchemaValidationError if the resolved root does not exist.
+    """
+    root = Path(schema_root).resolve() if schema_root else Path(swe_schemas.resolve_schema_root()).resolve()
+    if not root.exists():
+        raise SchemaValidationError(f"vendor schema root missing (no fallback): {root}")
+    if not root.is_dir():
+        raise SchemaValidationError(f"schema root is not a directory: {root}")
+    return str(root)
+
+
+def _iter_candidate_schema_relpaths(contract: str) -> list[str]:
+    """
+    Generate likely schema filenames for a contract string.
+    """
+    c = (contract or "").strip()
+    if not c:
+        return []
+
+    parts = c.split("/", 1)
+    base = parts[0].strip()
+    ver = parts[1].strip() if len(parts) == 2 else ""
+
+    ver_norm = ver.replace(".", "_").replace("-", "_")
+    base_norm = base.replace(".", "_").replace("-", "_")
+
+    candidates: list[str] = []
+
+    # Common patterns
+    if base:
+        candidates.append(f"schemas/{base}.schema.json")
+        candidates.append(f"schemas/{base_norm}.schema.json")
+        candidates.append(f"schemas/{base}.json")
+        candidates.append(f"schemas/{base_norm}.json")
+
+    if base and ver:
+        candidates.append(f"schemas/{base}_{ver_norm}.schema.json")
+        candidates.append(f"schemas/{base_norm}_{ver_norm}.schema.json")
+        candidates.append(f"schemas/{base}_{ver_norm}.json")
+        candidates.append(f"schemas/{base_norm}_{ver_norm}.json")
+
+    # Slash-baked
+    slash_norm = c.replace("/", "_").replace(".", "_").replace("-", "_")
+    candidates.append(f"schemas/{slash_norm}.schema.json")
+    candidates.append(f"schemas/{slash_norm}.json")
+
+    # De-dupe keep order
+    out: list[str] = []
+    seen = set()
+    for x in candidates:
+        if x not in seen:
+            out.append(x)
+            seen.add(x)
     return out
 
 
-def _normalize_contract(contract: str) -> str:
-    return contract.strip().lower()
+def _load_schema_obj(schema_path: Path) -> dict:
+    try:
+        return json.loads(schema_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SchemaValidationError(f"failed to load schema JSON: {schema_path}") from e
 
 
-def find_schema_for_contract(contract: str, schema_root: Optional[Path] = None) -> Path:
+def _content_scan_find_schema(root: Path, contract: str) -> Optional[Path]:
     """
-    Best-effort resolver.
-    Primary: schema_root/<contract>.json (supports subfolders if contract contains '/')
-    Fallback: recursive search for JSON file whose path contains the normalized contract tokens.
+    Deterministic fallback:
+    - scan vendor schemas under schemas/**/*.json in sorted path order
+    - select the first file whose content includes the exact contract string
     """
-    root = resolve_schema_root(schema_root)
-    if not root.exists():
-        raise SchemaValidationError(f"schema_root does not exist: {root}")
+    schemas_dir = (root / "schemas").resolve()
+    if not schemas_dir.is_dir():
+        return None
 
-    c = _normalize_contract(contract)
+    # Deterministic order
+    files = sorted([p for p in schemas_dir.rglob("*.json") if p.is_file()], key=lambda x: str(x).lower())
+    needle = contract
 
-    # 1) direct: <root>/<contract>.json
-    direct = (root / (c + ".json"))
-    if direct.exists():
-        return direct
+    for fp in files:
+        try:
+            txt = fp.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        if needle in txt:
+            return fp
 
-    # 2) direct with path segments: <root>/<contract>.json (contract may include '/')
-    direct2 = (root / Path(c + ".json"))
-    if direct2.exists():
-        return direct2
-
-    # 3) common pattern: <root>/<contract>/schema.json
-    direct3 = (root / Path(c) / "schema.json")
-    if direct3.exists():
-        return direct3
-
-    # 4) recursive token match
-    tokens = [t for t in re.split(r"[^a-z0-9]+", c) if t]
-    candidates: list[Path] = []
-    for p in _iter_json_files(root):
-        s = str(p).replace("\\", "/").lower()
-        if all(t in s for t in tokens):
-            candidates.append(p)
-
-    if not candidates:
-        raise SchemaValidationError(f"no schema found for contract='{contract}' under {root}")
-
-    candidates.sort(key=lambda p: (len(str(p)), str(p)))
-    return candidates[0]
+    return None
 
 
-def validate_payload(payload: Dict[str, Any], schema_root: Optional[Path] = None) -> None:
+def _resolve_schema_for_contract(root: Path, contract: str) -> Path:
     """
-    Validates payload against the schema resolved by payload['contract'].
-    Requires jsonschema to be installed; errors raise SchemaValidationError.
+    Resolve the schema file path for a given contract.
+    Hard-fails if not found. No non-vendor fallback.
     """
-    if "contract" not in payload or not isinstance(payload["contract"], str) or not payload["contract"].strip():
-        raise SchemaValidationError("payload missing required string field: contract")
+    # 1) Fast candidate filenames
+    for rel in _iter_candidate_schema_relpaths(contract):
+        p = (root / rel).resolve()
+        if p.is_file():
+            return p
 
-    contract = payload["contract"]
-    schema_path = find_schema_for_contract(contract, schema_root=schema_root)
+    # 2) Deterministic content scan fallback (preferred to guessing names)
+    found = _content_scan_find_schema(root, contract)
+    if found is not None:
+        return found.resolve()
+
+    raise SchemaValidationError(f"no schema found for contract='{contract}' under {root}")
+
+
+def validate_payload(payload: Any, schema_root: Optional[str] = None) -> None:
+    """
+    Public API (stable): validate a payload (dict or dataclass) against vendor schemas.
+
+    - payload must include 'contract' field (string).
+    - schema_root optional override; when None, uses canonical vendor/swe-schemas.
+    """
+    if is_dataclass(payload):
+        payload = asdict(payload)
+
+    if not isinstance(payload, dict):
+        raise SchemaValidationError(f"payload must be dict-like; got {type(payload)}")
+
+    contract = (payload.get("contract") or "").strip()
+    if not contract:
+        raise SchemaValidationError("payload missing required field: contract")
+
+    root = Path(resolve_schema_root(schema_root)).resolve()
+    schema_path = _resolve_schema_for_contract(root, contract)
+    schema_obj = _load_schema_obj(schema_path)
 
     try:
-        import jsonschema  # type: ignore
-    except Exception as e:
-        raise SchemaValidationError("jsonschema is required for validation but is not available") from e
+        jsonschema.validate(instance=payload, schema=schema_obj)
+    except jsonschema.ValidationError as e:
+        raise SchemaValidationError(str(e)) from e
+    except jsonschema.SchemaError as e:
+        raise SchemaValidationError(str(e)) from e
 
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    try:
-        jsonschema.validate(instance=payload, schema=schema)
-    except Exception as e:
-        raise SchemaValidationError(
-            f"schema validation failed for contract='{contract}' schema='{schema_path}'"
-        ) from e
 
-# === PHASE3_STEP3H_OVERRIDE_RESOLVE_SCHEMA_ROOT ===
-
-# Phase 3 hardening:
-# - resolve schema root from swe_schemas.resolve_schema_root() at call-time
-# - raise if the resolved path does not exist (no silent fallback)
-
-def resolve_schema_root(schema_root=None):  # type: ignore[override]
-    from pathlib import Path
-    import swe_schemas  # call-time import to honor bootstrap + monkeypatch in tests
-
-    if schema_root is not None:
-        p = Path(schema_root)
-    else:
-        p = Path(swe_schemas.resolve_schema_root())
-
-    if not p.exists():
-        raise SchemaValidationError(f"schema_root does not exist: {p}")
-    return p
-
+__all__ = [
+    "swe_schemas",
+    "SchemaValidationError",
+    "resolve_schema_root",
+    "validate_payload",
+]

@@ -1,16 +1,18 @@
+"""
+swe_runner package boundary (Phase 3 hardening).
+
+Contract:
+- swe_runner is bound to canonical schema-root resolution via swe_schemas
+- no local/forked schema root resolver is permitted
+"""
+
 from __future__ import annotations
 
-"""
-swe_runner (minimal stub)
+# Canonical plumbing bind (do not remove)
+import swe_schemas as swe_schemas  # noqa: F401
+from swe_schemas import resolve_schema_root as resolve_schema_root  # noqa: F401
 
-Purpose (Phase 3 recovery):
-- Provide a deterministic import target for `import swe_runner` after `swe_bootstrap.apply()`.
-- Keep import-time side effects at ZERO.
-- Future Phase 3 work can replace/expand this with the real runner implementation/submodule.
-"""
-
-__all__ = ["__version__", "about"]
-__version__ = "0.0.0-dev"
-
-def about() -> str:
-    return "swe_runner stub (Phase 3 recovery): import-safe, side-effect free."
+__all__ = [
+    "resolve_schema_root",
+    "swe_schemas",
+]

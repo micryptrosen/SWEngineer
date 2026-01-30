@@ -2,54 +2,94 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import swe_schemas
 
 
 class SchemaValidationError(Exception):
     pass
 
 
-def _canonical_json_bytes(obj: Any) -> bytes:
+def resolve_schema_root(schema_root: Optional[str] = None) -> str:
     """
-    Canonical JSON bytes: stable key ordering, no trailing spaces, LF newline.
+    Phase3 invariant:
+      - default resolves via swe_schemas.resolve_schema_root() (vendor-backed)
+      - MUST NOT silently fall back if missing; must raise SchemaValidationError.
     """
+    try:
+        if schema_root is None:
+            root = Path(swe_schemas.resolve_schema_root()).resolve()
+        else:
+            root = Path(str(schema_root)).resolve()
+    except Exception as e:
+        raise SchemaValidationError(f"failed to resolve schema root: {e}") from e
+
+    if not root.exists():
+        raise SchemaValidationError(f"vendor schema root missing: {root}")
+
+    return str(root)
+
+
+def _canonical_json_bytes(obj: Any, trailing_newline: bool = True) -> bytes:
     txt = json.dumps(obj, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
-    return (txt + "\n").encode("utf-8")
+    if trailing_newline:
+        txt += "\n"
+    return txt.encode("utf-8")
+
+
+def _pretty_json_bytes(obj: Any, crlf: bool = False) -> bytes:
+    txt = json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    if crlf:
+        txt = txt.replace("\n", "\r\n")
+    return txt.encode("utf-8")
+
+
+def _sha256_hex(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def _envelope_for_hash(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    SHA policy covers the entire top-level payload envelope, excluding the
+    payload_sha256 field itself.
+    """
+    env = dict(payload)
+    env.pop("payload_sha256", None)
+    return env
+
+
+def canonical_sha256_for_payload(payload: Dict[str, Any]) -> str:
+    env = _envelope_for_hash(payload)
+    return _sha256_hex(_canonical_json_bytes(env, trailing_newline=True))
 
 
 def compute_payload_sha256(payload: Dict[str, Any]) -> str:
     """
-    Canonical payload SHA256 (hex) for run_handoff payload bodies.
+    Public API (legacy name) used by tests/governance:
+    returns canonical sha256 over the envelope (excluding payload_sha256).
     """
-    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+    return canonical_sha256_for_payload(payload)
 
 
 def _legacy_sha_variants(payload: Dict[str, Any]) -> List[str]:
-    """
-    Legacy compatibility window:
-    Return a list of allowed sha256 hex digests that historically appeared in producers
-    before canonicalization was unified.
-
-    Governance rule: all accepted legacy variants MUST be generated here and locked by tests.
-    """
+    env = _envelope_for_hash(payload)
     variants: List[str] = []
 
-    # Variant A: canonical bytes (current)
-    variants.append(hashlib.sha256(_canonical_json_bytes(payload)).hexdigest())
+    # A: canonical (sorted keys, compact, with trailing newline)
+    variants.append(_sha256_hex(_canonical_json_bytes(env, trailing_newline=True)))
 
-    # Variant B: canonical JSON without trailing newline
-    txt = json.dumps(payload, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
-    variants.append(hashlib.sha256(txt.encode("utf-8")).hexdigest())
+    # B: canonical without trailing newline
+    variants.append(_sha256_hex(_canonical_json_bytes(env, trailing_newline=False)))
 
-    # Variant C: pretty JSON (indent=2, sort_keys) + LF
-    txt_pretty_lf = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    variants.append(hashlib.sha256(txt_pretty_lf.encode("utf-8")).hexdigest())
+    # C: pretty + LF
+    variants.append(_sha256_hex(_pretty_json_bytes(env, crlf=False)))
 
-    # Variant D: pretty JSON (indent=2, sort_keys) + CRLF
-    txt_pretty_crlf = txt_pretty_lf.replace("\n", "\r\n")
-    variants.append(hashlib.sha256(txt_pretty_crlf.encode("utf-8")).hexdigest())
+    # D: pretty + CRLF
+    variants.append(_sha256_hex(_pretty_json_bytes(env, crlf=True)))
 
-    # De-dup while preserving order
+    # de-dupe in order
     seen = set()
     out: List[str] = []
     for v in variants:
@@ -59,14 +99,11 @@ def _legacy_sha_variants(payload: Dict[str, Any]) -> List[str]:
     return out
 
 
-def payload_sha_is_accepted(payload_body: Dict[str, Any], declared_sha256: str) -> bool:
-    """
-    Returns True if declared_sha256 matches canonical or allowed legacy variants.
-    """
+def payload_sha_is_accepted(payload: Dict[str, Any], declared_sha256: str) -> bool:
     d = (declared_sha256 or "").strip().lower()
     if not d:
         return False
-    return d in _legacy_sha_variants(payload_body)
+    return d in _legacy_sha_variants(payload)
 
 
 def validate_payload(payload: Dict[str, Any]) -> None:
@@ -74,20 +111,25 @@ def validate_payload(payload: Dict[str, Any]) -> None:
     Validate vendor schema payload and enforce (canonical + legacy-window) SHA policy.
     Raises SchemaValidationError on any validation failure.
     """
-    # Import here to avoid import cycles in app boot.
-    from app.validation.vendor_schema_loader import validate_against_vendor_schema
+    if not isinstance(payload, dict):
+        raise SchemaValidationError("payload must be an object")
 
-    validate_against_vendor_schema(payload)
+    # Enforce resolver default (and existence) up-front.
+    _ = resolve_schema_root(None)
 
-    # SHA enforcement: for run_handoff payloads, confirm payload_sha256 aligns with allowed window
     try:
-        body = payload.get("payload", {})
-        declared = payload.get("payload_sha256", "")
+        from app.validation.vendor_schema_loader import validate_against_vendor_schema
     except Exception as e:
-        raise SchemaValidationError(f"Invalid payload structure: {e}") from e
+        raise SchemaValidationError(f"validator wiring error: {e}") from e
 
-    if not isinstance(body, dict):
-        raise SchemaValidationError("payload.payload must be an object")
+    try:
+        validate_against_vendor_schema(payload)
+    except Exception as e:
+        raise SchemaValidationError(str(e)) from e
 
-    if not payload_sha_is_accepted(body, str(declared)):
+    declared = payload.get("payload_sha256", "")
+    if not isinstance(declared, str) or not declared.strip():
+        raise SchemaValidationError("payload_sha256 missing")
+
+    if not payload_sha_is_accepted(payload, declared):
         raise SchemaValidationError("payload_sha256 mismatch (not canonical and not within legacy window)")

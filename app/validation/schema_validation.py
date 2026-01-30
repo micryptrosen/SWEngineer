@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import jsonschema
+from app.util.canonical_json import canonical_sha256_for_payload
 
 from referencing import Registry
 from referencing.retrieval import to_cached_resource
@@ -176,20 +177,23 @@ def _validate_with_refs(payload: Dict[str, Any], schema: Dict[str, Any], schema_
     except Exception as e:
         raise SchemaValidationError(str(e)) from e
 
-def _enforce_payload_sha256(payload: Dict[str, Any]) -> None:
+def _enforce_payload_sha256(payload: Dict[str, Any], *, strict: bool = True) -> None:
     """
     Phase 2E invariant + negative tests:
       - payload_sha256 must exist
       - must be 64 lowercase hex
-      - must verify against canonical hash of payload-without-sha
+      - when strict=True: must verify against canonical hash of payload-without-sha
     """
     got = payload.get("payload_sha256")
     if not isinstance(got, str):
         raise SchemaValidationError("payload_sha256 is required")
     if not _SHA256_RE.match(got):
         raise SchemaValidationError("payload_sha256 must be 64 lowercase hex")
-    # NOTE: verification is enforced by dedicated Phase2E tests; vendor fixtures may not carry our canonical digest.
-    # Keep presence + format enforcement here.
+
+    if strict:
+        want = canonical_sha256_for_payload(payload)
+        if got != want:
+            raise SchemaValidationError("payload_sha256 does not match canonical payload digest")
 
 
 def validate_payload(payload: Dict[str, Any], *, strict: bool = True, schema_root: Optional[str] = None) -> Dict[str, Any]:
@@ -210,7 +214,7 @@ def validate_payload(payload: Dict[str, Any], *, strict: bool = True, schema_roo
     _validate_with_refs(payload, schema, schema_path, store)
 
     # Always enforce payload_sha256 (tests require this)
-    _enforce_payload_sha256(payload)
+    _enforce_payload_sha256(payload, strict=strict)
 
     return payload
 

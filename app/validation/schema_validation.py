@@ -5,11 +5,23 @@ import importlib.util as _importlib_util
 import json
 import re
 import sys as _sys
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import jsonschema
 from app.util.canonical_json import canonical_sha256_for_payload
+
+def _legacy_sha256_for_payload(payload: Dict[str, Any]) -> str:
+    """
+    Compatibility digest for pre-Step5IE producers and vendor fixtures.
+    Canonical-ish but legacy: compact separators, ensure_ascii=True, no trailing newline.
+    """
+    p = dict(payload)
+    p.pop("payload_sha256", None)
+    txt = json.dumps(p, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(txt.encode("utf-8")).hexdigest()
+
 
 from referencing import Registry
 from referencing.retrieval import to_cached_resource
@@ -179,10 +191,12 @@ def _validate_with_refs(payload: Dict[str, Any], schema: Dict[str, Any], schema_
 
 def _enforce_payload_sha256(payload: Dict[str, Any], *, strict: bool = True) -> None:
     """
-    Phase 2E invariant + negative tests:
+    Phase 2E invariant + compatibility window:
       - payload_sha256 must exist
       - must be 64 lowercase hex
-      - when strict=True: must verify against canonical hash of payload-without-sha
+      - when strict=True: must verify against either:
+          (a) Step5IE canonical digest (preferred)
+          (b) legacy digest used by pre-Step5IE producers + vendor fixtures
     """
     got = payload.get("payload_sha256")
     if not isinstance(got, str):
@@ -191,9 +205,13 @@ def _enforce_payload_sha256(payload: Dict[str, Any], *, strict: bool = True) -> 
         raise SchemaValidationError("payload_sha256 must be 64 lowercase hex")
 
     if strict:
-        want = canonical_sha256_for_payload(payload)
-        if got != want:
-            raise SchemaValidationError("payload_sha256 does not match canonical payload digest")
+        want_new = canonical_sha256_for_payload(payload)
+        if got == want_new:
+            return
+        want_legacy = _legacy_sha256_for_payload(payload)
+        if got == want_legacy:
+            return
+        raise SchemaValidationError("payload_sha256 does not match canonical or legacy payload digest")
 
 
 def validate_payload(payload: Dict[str, Any], *, strict: bool = True, schema_root: Optional[str] = None) -> Dict[str, Any]:

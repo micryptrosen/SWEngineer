@@ -10,6 +10,9 @@ from typing import Any, Dict, Optional
 
 import jsonschema
 
+from referencing import Registry
+from referencing.retrieval import to_cached_resource
+
 from app.validation.canonical import verify_payload_sha256
 
 
@@ -125,23 +128,45 @@ def _build_ref_store(schema_root: Path) -> Dict[str, Any]:
     return store
 
 
+
+
+def _registry_from_store(store: Dict[str, Any]) -> "Registry":
+    """
+    Build a referencing.Registry from our explicit store mapping.
+
+    Determinism + vendor-root-only:
+      - ONLY URIs present in `store` are resolvable
+      - no filesystem/network fetch is allowed or used
+    """
+    reg = Registry()
+    for uri, schema in (store or {}).items():
+        reg = reg.with_resource(uri, to_cached_resource(schema))
+    return reg
+
 def _validate_with_refs(payload: Dict[str, Any], schema: Dict[str, Any], schema_path: Path, store: Dict[str, Any]) -> None:
+    """
+    Validate payload against schema, resolving $refs ONLY from the explicit in-memory store.
+
+    This removes referencing.Registry (deprecated) and uses the referencing.Registry path
+    while preserving:
+      - vendor-root-only resolution (no ambient discovery)
+      - deterministic behavior under python -I
+      - local $ref behavior (relative refs resolve against schema $id / file URI)
+    """
     if "$id" not in schema:
         schema["$id"] = schema_path.resolve().as_uri()
-
-    base_uri = schema.get("$id", schema_path.resolve().as_uri())
-    try:
-        resolver = jsonschema.RefResolver(base_uri=base_uri, referrer=schema, store=store)  # type: ignore[attr-defined]
-    except Exception:
-        resolver = None  # type: ignore[assignment]
 
     try:
         validator_cls = jsonschema.validators.validator_for(schema)
         validator_cls.check_schema(schema)
-        v = validator_cls(schema, resolver=resolver) if resolver is not None else validator_cls(schema)
+
+        registry = _registry_from_store(store)
+        v = validator_cls(schema, registry=registry)
+
         errors = sorted(v.iter_errors(payload), key=lambda e: (list(e.path), e.message))
         if errors:
             raise SchemaValidationError(errors[0].message)
+
     except SchemaValidationError:
         raise
     except jsonschema.SchemaError as e:
@@ -150,7 +175,6 @@ def _validate_with_refs(payload: Dict[str, Any], schema: Dict[str, Any], schema_
         raise SchemaValidationError(e.message) from e
     except Exception as e:
         raise SchemaValidationError(str(e)) from e
-
 
 def _enforce_payload_sha256(payload: Dict[str, Any]) -> None:
     """

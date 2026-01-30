@@ -26,7 +26,7 @@ Gate "pytest -q" {
 }
 
 Gate "isolated -I smoke (planner -> handoff -> validate)" {
-  python -I tools\isolated_e2e_smoke.py
+  python -I tests\test_phase3_step3o_isolated_e2e_planner_handoff_validation.py
 }
 
 if (-not $SkipStatusClean) {
@@ -38,3 +38,4 @@ if (-not $SkipStatusClean) {
 }
 
 Write-Host "SMOKE_OK=GREEN"
+

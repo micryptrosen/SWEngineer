@@ -14,23 +14,41 @@ from app.util.canonical_json import canonical_sha256_for_payload
 
 def _legacy_sha256_for_payload(payload: Dict[str, Any]) -> str:
     """
-    Compatibility digest for pre-Step5IE producers and vendor fixtures.
-    Canonical-ish but legacy: compact separators, ensure_ascii=True, no trailing newline.
+    Compatibility digests for pre-Step5IE producers and vendor fixtures.
+
+    We accept a small, explicit set of legacy canonicalization styles:
+      A) compact JSON: separators=(',', ':'), ensure_ascii=True
+      B) pretty JSON: indent=2, sort_keys=True, ensure_ascii=False, with trailing '\\n'
+      C) pretty JSON: indent=2, sort_keys=True, ensure_ascii=False, no trailing newline
+
+    We return the FIRST variant's digest (A) for callers that want "a legacy digest",
+    but _enforce_payload_sha256() may compare against multiple variants by calling
+    _legacy_sha256_variants_for_payload().
     """
+    return _legacy_sha256_variants_for_payload(payload)[0]
+
+def _legacy_sha256_variants_for_payload(payload: Dict[str, Any]) -> List[str]:
     p = dict(payload)
     p.pop("payload_sha256", None)
-    txt = json.dumps(p, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(txt.encode("utf-8")).hexdigest()
 
+    variants: List[bytes] = []
 
-from referencing import Registry
-from referencing.retrieval import to_cached_resource
+    # A) compact
+    txt_a = json.dumps(p, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    variants.append(txt_a.encode("utf-8"))
 
-from app.validation.canonical import verify_payload_sha256
+    # B) pretty + newline (most common fixture style)
+    txt_b = json.dumps(p, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    variants.append(txt_b.encode("utf-8"))
 
+    # C) pretty (no newline)
+    txt_c = json.dumps(p, sort_keys=True, indent=2, ensure_ascii=False)
+    variants.append(txt_c.encode("utf-8"))
 
-class SchemaValidationError(ValueError):
-    """Raised when a payload fails schema validation."""
+    out: List[str] = []
+    for b in variants:
+        out.append(hashlib.sha256(b).hexdigest())
+    return out
 
 
 def _swe_find_repo_root(_start: Path) -> Path:
@@ -208,10 +226,10 @@ def _enforce_payload_sha256(payload: Dict[str, Any], *, strict: bool = True) -> 
         want_new = canonical_sha256_for_payload(payload)
         if got == want_new:
             return
-        want_legacy = _legacy_sha256_for_payload(payload)
-        if got == want_legacy:
-            return
-        raise SchemaValidationError("payload_sha256 does not match canonical or legacy payload digest")
+        for want_legacy in _legacy_sha256_variants_for_payload(payload):
+            if got == want_legacy:
+                return
+        raise SchemaValidationError("payload_sha256 does not match canonical or any known legacy payload digest")
 
 
 def validate_payload(payload: Dict[str, Any], *, strict: bool = True, schema_root: Optional[str] = None) -> Dict[str, Any]:

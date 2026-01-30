@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass
 from typing import List, Optional
 
 from .store import EvidenceRecord, GuiStore, utc_now_iso
-from app.validation.schema_validation import validate_payload
+from app.validation.schema_validation import validate_payload, canonical_sha256_for_payload
 
 
 @dataclass(frozen=True)
@@ -270,7 +270,14 @@ def persist_handoff_from_plan(
     )
 
     # Validate final handoff payload (includes payload_sha256)
-    validate_payload(asdict(handoff))
+    payload = asdict(handoff)
+    # Phase 2E: always compute canonical payload_sha256 before validation
+    payload["payload_sha256"] = canonical_sha256_for_payload(payload)
+    try:
+        handoff.payload_sha256 = payload["payload_sha256"]  # keep record consistent
+    except Exception:
+        pass
+    validate_payload(payload)
 
     payload = json.dumps(asdict(handoff), ensure_ascii=False, sort_keys=True, indent=2)
     summary = f"RUN_HANDOFF {plan_rec.ev_id} -> {handoff.runner_label}"

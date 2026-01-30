@@ -1,13 +1,15 @@
-# Enforce consistent line endings
+# Phase5/Step5IN: enforce stable line endings across platforms
 * text=auto eol=lf
 
-# PowerShell scripts stay CRLF on Windows
+# Windows scripts stay CRLF
 *.ps1 text eol=crlf
-*.psm1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
-# Python / config should be LF
-*.py text eol=lf
-*.toml text eol=lf
-*.yml text eol=lf
+# Data / schemas
+*.json text eol=lf
+*.yml  text eol=lf
 *.yaml text eol=lf
-*.md text eol=lf
+
+# Python
+*.py   text eol=lf

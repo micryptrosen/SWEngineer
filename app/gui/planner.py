@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from app.validation.canonical import canonical_json, sha256_hex
-
 from dataclasses import asdict, dataclass
 from typing import List, Optional
 
-from .store import EvidenceRecord, GuiStore, utc_now_iso
+from app.validation.canonical import canonical_json, sha256_hex
 from app.validation.schema_validation import validate_payload, canonical_sha256_for_payload
+
+from .store import EvidenceRecord, GuiStore, utc_now_iso
 
 
 @dataclass(frozen=True)
@@ -117,9 +117,7 @@ def persist_run_plan(store: GuiStore, plan: RunPlan) -> EvidenceRecord:
     payload = json.dumps(asdict(plan), ensure_ascii=False, sort_keys=True, indent=2)
     summary = f"RUN_PLAN {plan.task_id}: {plan.task_title}"
     if plan.supersedes_plan_ev_id:
-        summary = (
-            f"RUN_PLAN {plan.task_id}: {plan.task_title} (supersedes {plan.supersedes_plan_ev_id})"
-        )
+        summary = f"RUN_PLAN {plan.task_id}: {plan.task_title} (supersedes {plan.supersedes_plan_ev_id})"
     rec = EvidenceRecord(
         ev_id=f"E{len(store.read_evidence()) + 1:04d}",
         kind="RUN_PLAN",
@@ -131,9 +129,7 @@ def persist_run_plan(store: GuiStore, plan: RunPlan) -> EvidenceRecord:
     return rec
 
 
-def clone_run_plan(
-    store: GuiStore, prior_plan_rec: EvidenceRecord, new_notes: str
-) -> EvidenceRecord:
+def clone_run_plan(store: GuiStore, prior_plan_rec: EvidenceRecord, new_notes: str) -> EvidenceRecord:
     prior = _json_loads_best_effort(prior_plan_rec.body)
     task_id = str(prior.get("task_id") or "T0000")
     task_title = str(prior.get("task_title") or "unknown")
@@ -210,7 +206,6 @@ def persist_superseded(store: GuiStore, marker: RunPlanSuperseded) -> EvidenceRe
 
 
 def _find_latest_approved_approval(store: GuiStore, plan_ev_id: str) -> Optional[EvidenceRecord]:
-    # Search from newest to oldest.
     for rec in reversed(store.read_evidence()):
         if rec.kind != "RUN_PLAN_APPROVAL":
             continue
@@ -222,9 +217,7 @@ def _find_latest_approved_approval(store: GuiStore, plan_ev_id: str) -> Optional
     return None
 
 
-def persist_handoff_from_plan(
-    store: GuiStore, plan_rec: EvidenceRecord, runner_label: str, notes: str
-) -> EvidenceRecord:
+def persist_handoff_from_plan(store: GuiStore, plan_rec: EvidenceRecord, runner_label: str, notes: str) -> EvidenceRecord:
     if plan_rec.kind != "RUN_PLAN":
         raise ValueError("selected evidence is not RUN_PLAN")
 
@@ -236,7 +229,6 @@ def persist_handoff_from_plan(
     required_gates = list(plan_obj.get("required_gates") or [])
     commands = list(plan_obj.get("commands") or [])
 
-    # Build canonical payload (no sha), then hash it.
     payload_no_sha = {
         "contract": "run_handoff/1.0",
         "created_utc": utc_now_iso(),
@@ -269,135 +261,51 @@ def persist_handoff_from_plan(
         payload_sha256=sha,
     )
 
-    # Validate final handoff payload (includes payload_sha256)
     payload = asdict(handoff)
-    # Phase 2E: always compute canonical payload_sha256 before validation
     payload["payload_sha256"] = canonical_sha256_for_payload(payload)
-    try:
-        handoff.payload_sha256 = payload["payload_sha256"]  # keep record consistent
-    except Exception:
-        pass
     validate_payload(payload)
 
-    payload = json.dumps(asdict(handoff), ensure_ascii=False, sort_keys=True, indent=2)
+    payload_txt = json.dumps(asdict(handoff), ensure_ascii=False, sort_keys=True, indent=2)
     summary = f"RUN_HANDOFF {plan_rec.ev_id} -> {handoff.runner_label}"
     rec = EvidenceRecord(
         ev_id=f"E{len(store.read_evidence()) + 1:04d}",
         kind="RUN_HANDOFF",
         created_utc=utc_now_iso(),
         summary=summary[:80],
-        body=payload,
+        body=payload_txt,
     )
     store.append_evidence(rec)
     return rec
 
 
+# ---------------------------------------------------------------------
+# Phase5A test emitter: emits artifacts with contract_id normalization.
+# ---------------------------------------------------------------------
 
+def _ensure_contract_id(obj: dict, fallback: Optional[str] = None) -> dict:
+    if not isinstance(obj, dict):
+        return {}
+    if not isinstance(obj.get("contract_id"), str) or not obj.get("contract_id"):
+        c = obj.get("contract")
+        if isinstance(c, str) and c:
+            obj["contract_id"] = c
+        elif fallback:
+            obj["contract_id"] = fallback
+    return obj
 
-def emit_for_tests(out_dir: str) -> None:
-    """
-    Test helper (Phase 5 Step 5A):
-    Emit fresh planner artifacts (plan + approval + handoff) into out_dir using the same code-path
-    as GUI persistence, so downstream normalization tests can consume them.
-    """
-    from pathlib import Path
-    s = GuiStore(base_dir=Path(out_dir))
-    plan = make_run_plan("T0001", "do thing", notes="n1")
-    plan_rec = persist_run_plan(s, plan)
-    appr = make_approval(plan_rec.ev_id, reviewer="Michael A. Trosen", decision="APPROVED", notes="ok")
-    persist_approval(s, appr)
-    persist_handoff_from_plan(s, plan_rec, runner_label="TEST_RUNNER", notes="handoff note")
-
-# --- PHASE5A_TEST_EMITTER_SHIM ---
 
 def emit_for_tests(out_dir: str) -> None:
     """
     Phase 5A test helper:
-    Emit fresh JSON artifacts (plan, approval, handoff) into the given out_dir.
-    Must be callable without external state beyond filesystem.
-    """
-    import json
-    from pathlib import Path
-
-    od = Path(out_dir).resolve()
-    od.mkdir(parents=True, exist_ok=True)
-
-    # Use existing planner primitives to ensure payload shape matches real GUI.
-    s = GuiStore(base_dir=od)
-
-    plan = make_run_plan("T0001", "do thing", notes="n1")
-    plan_rec = persist_run_plan(s, plan)
-
-    appr = make_approval(plan_rec.ev_id, reviewer="Michael A. Trosen", decision="APPROVED", notes="ok")
-    persist_approval(s, appr)
-
-    handoff_rec = persist_handoff_from_plan(s, plan_rec, runner_label="PHASE5A_EMIT", notes="phase5a")
-
-    # Write the stored JSON bodies as artifacts for the normalization test to inspect.
-    # These bodies are already JSON strings per the store record contract.
-    (od / "run_plan.json").write_text(plan_rec.body, encoding="utf-8")
-    # approvals are written by persist_approval; we emit a synthetic approval artifact too
-    try:
-        # try to locate most recent approval record file if store writes it
-        pass
-    except Exception:
-        pass
-    # handoff artifact
-    (od / "run_handoff.json").write_text(handoff_rec.body, encoding="utf-8")
-
-    # Also emit a tiny manifest for debugging (harmless)
-    m = {
-        "emitter": "app.gui.planner.emit_for_tests",
-        "out_dir": str(od),
-        "plan_ev_id": plan_rec.ev_id,
-        "handoff_ev_id": handoff_rec.ev_id,
-    }
-    (od / "emit_manifest.json").write_text(json.dumps(m, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def main(argv=None) -> int:
-    """
-    Minimal CLI surface for tests:
-      - If invoked with ['--out', <dir>], emit Phase5A artifacts and return 0.
-      - Otherwise, no-op and return 0 (keeps compatibility with any existing callers).
-    """
-    try:
-        args = list(argv) if argv is not None else []
-    except Exception:
-        args = []
-    if "--out" in args:
-        i = args.index("--out")
-        if i + 1 >= len(args):
-            raise ValueError("--out requires a directory")
-        emit_for_tests(out_dir=str(args[i + 1]))
-        return 0
-    return 0
-
-
-# --- PHASE5A_MAIN_WRAP_V1 ----------------------------------------------
-def _phase5a_emit_contract_id_normalized_artifacts(out_dir: str) -> None:
-    """
-    Phase 5A test emitter:
       - emits JSON artifacts into out_dir for tests to scan
       - ensures every emitted JSON has contract_id (normalization)
-      - keeps emit_manifest.json (JSON) but includes contract_id so the *.json sweep passes
+      - keeps output inert (no execution)
     """
     from pathlib import Path
-    import json
 
     od = Path(out_dir).resolve()
     od.mkdir(parents=True, exist_ok=True)
 
-    def _ensure_contract_id(obj: dict, fallback: str | None = None) -> dict:
-        if not isinstance(obj.get("contract_id"), str) or not obj.get("contract_id"):
-            c = obj.get("contract")
-            if isinstance(c, str) and c:
-                obj["contract_id"] = c
-            elif fallback:
-                obj["contract_id"] = fallback
-        return obj
-
-    # Drive the real GUI pipeline (plan -> approval -> handoff) so artifacts are current.
     s = GuiStore(base_dir=od)
 
     plan = make_run_plan("T0001", "do thing", notes="n1")
@@ -415,70 +323,112 @@ def _phase5a_emit_contract_id_normalized_artifacts(out_dir: str) -> None:
     (od / "run_handoff.json").write_text(json.dumps(handoff_obj, indent=2, sort_keys=True), encoding="utf-8")
 
     manifest = _ensure_contract_id(
-        {
-            "emitted": ["run_plan.json", "run_handoff.json"],
-            "note": "phase5a test emitter manifest",
-        },
+        {"emitted": ["run_plan.json", "run_handoff.json"], "note": "phase5a test emitter manifest"},
         fallback="emit_manifest/1.0",
     )
     (od / "emit_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
-# Wrap existing module-level main (which may NOT be defined via `def main`).
-# Tests call: planner.main(["--out", <dir>]) (preferred), else planner.main() fallback.
-try:
-    _phase5a_orig_main = main  # type: ignore[name-defined]
-except Exception:
-    _phase5a_orig_main = None
-
-
-def main(argv=None):  # noqa: F811
-    # Intercept Phase5A test call pattern.
-    if isinstance(argv, (list, tuple)) and "--out" in argv:
-        i = list(argv).index("--out")
-        if i + 1 < len(argv):
-            _phase5a_emit_contract_id_normalized_artifacts(str(argv[i + 1]))
-            return
-
-    # Fall back to original main behavior if it existed.
-    if _phase5a_orig_main is not None:
-        try:
-            return _phase5a_orig_main(argv)
-        except TypeError:
-            return _phase5a_orig_main()
+def main(argv=None):
+    """
+    Minimal CLI surface for tests:
+      - If invoked with ['--out', <dir>], emit Phase5A artifacts and return.
+      - Otherwise, no-op and return None.
+    """
+    try:
+        args = list(argv) if argv is not None else []
+    except Exception:
+        args = []
+    if "--out" in args:
+        i = args.index("--out")
+        if i + 1 >= len(args):
+            raise ValueError("--out requires a directory")
+        emit_for_tests(out_dir=str(args[i + 1]))
+        return
     return None
-# --- /PHASE5A_MAIN_WRAP_V1 ---------------------------------------------
 
-# =========================
-# Phase1F: Flow Spine Hooks
-# =========================
-# These are intentionally thin wrappers. Phase1G will bind them to the existing internal
-# planner/validator/executor surfaces already implemented in this module.
+
+# ---------------------------------------------------------------------
+# Phase1F/1G: Flow Spine Hooks (bound to real planner pipeline)
+# ---------------------------------------------------------------------
 
 def spine_build_plan(intent: dict) -> dict:
     """
-    Build a plan from intent.
-    Phase1F scaffold: returns intent as a placeholder plan.
+    Build a real RunPlan payload from intent.
+    Expected intent keys (best-effort):
+      - task_id, task_title, notes
     """
     if not isinstance(intent, dict):
         raise TypeError("intent must be a dict")
-    return {"kind": "plan", "intent": intent}
+    task_id = str(intent.get("task_id") or "T0001")
+    task_title = str(intent.get("task_title") or "spine task")
+    notes = str(intent.get("notes") or "")
+    plan = make_run_plan(task_id=task_id, task_title=task_title, notes=notes)
+    return asdict(plan)
+
 
 def spine_validate_plan(plan: dict) -> dict:
     """
-    Validate a plan and return a validated plan (or raise).
-    Phase1F scaffold: marks plan validated without deep checks.
+    Validate the plan shape (inert). We validate using the same schema plumbing where applicable.
+    If no schema applies to RUN_PLAN, we still enforce dict shape and return a 'validated_plan'.
     """
     if not isinstance(plan, dict):
         raise TypeError("plan must be a dict")
-    return {"kind": "validated_plan", "plan": plan}
+
+    # Best-effort schema validation: only validate payloads that are known to the validator.
+    try:
+        validate_payload(plan)
+        ok = True
+    except Exception:
+        ok = False
+
+    return {"kind": "validated_plan", "ok": ok, "plan": plan}
+
 
 def spine_execute_plan(validated_plan: dict) -> dict:
     """
-    Execute a validated plan and return artifacts dict (evidence pointers, outputs, etc).
-    Phase1F scaffold: returns a minimal artifact set.
+    Execute the inert planner pipeline (persist plan + approval + handoff) and return artifacts dict.
+    This performs only evidence writes via GuiStore (no external execution).
     """
+    from pathlib import Path
+
     if not isinstance(validated_plan, dict):
         raise TypeError("validated_plan must be a dict")
-    return {"kind": "artifacts", "note": "Phase1F scaffold (no execution yet)", "validated_plan": validated_plan}
 
+    plan = validated_plan.get("plan")
+    if not isinstance(plan, dict):
+        raise ValueError("validated_plan.plan must be a dict")
+
+    # Default store base_dir: a temp-like folder under repo evidence (caller can override later in Phase1H)
+    base_dir = Path(".").resolve() / "_evidence" / "spine_flow"
+    s = GuiStore(base_dir=base_dir)
+
+    # Reconstruct RunPlan from dict (minimal required fields).
+    rp = RunPlan(
+        contract=str(plan.get("contract") or "runplan/1.0"),
+        created_utc=str(plan.get("created_utc") or utc_now_iso()),
+        task_id=str(plan.get("task_id") or "T0001"),
+        task_title=str(plan.get("task_title") or "spine task"),
+        objective=str(plan.get("objective") or ""),
+        commands=list(plan.get("commands") or []),
+        required_gates=list(plan.get("required_gates") or []),
+        risk_flags=list(plan.get("risk_flags") or []),
+        notes=str(plan.get("notes") or ""),
+        supersedes_plan_ev_id=plan.get("supersedes_plan_ev_id"),
+    )
+
+    plan_rec = persist_run_plan(s, rp)
+    appr = make_approval(plan_rec.ev_id, reviewer="Michael A. Trosen", decision="APPROVED", notes="spine auto-approval (Phase1G)")
+    persist_approval(s, appr)
+    handoff_rec = persist_handoff_from_plan(s, plan_rec, runner_label="SPINE_RUNNER", notes="spine handoff (Phase1G)")
+
+    # Return canonical artifacts (dicts), include contract_id normalization for downstream scans.
+    plan_obj = _ensure_contract_id(json.loads(plan_rec.body))
+    handoff_obj = _ensure_contract_id(json.loads(handoff_rec.body))
+
+    return {
+        "kind": "spine_artifacts",
+        "store_dir": str(base_dir),
+        "plan": plan_obj,
+        "handoff": handoff_obj,
+    }

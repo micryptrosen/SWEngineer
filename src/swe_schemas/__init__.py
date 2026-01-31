@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
-# NOTE:
 # Clean-clone determinism requirement:
 # - Default schema root MUST be derived from THIS module location (src-layout),
 #   never from any external/previous checkout path.
@@ -19,10 +18,9 @@ _ENV_KEYS = (
 def _repo_root_from_module() -> Path:
     # <repo>/src/swe_schemas/__init__.py -> parents[2] == <repo>
     here = Path(__file__).resolve()
-    repo = here.parents[2]
-    return repo
+    return here.parents[2]
 
-def resolve_schema_root(schema_root: Optional[str] = None) -> str:
+def resolve_schema_root(schema_root: Optional[Union[str, Path]] = None) -> Path:
     """
     Resolve the canonical schema root directory.
 
@@ -32,19 +30,19 @@ def resolve_schema_root(schema_root: Optional[str] = None) -> str:
       3) default: <repo>/vendor/swe-schemas (repo derived from this module path)
 
     Contract:
+      - Returns pathlib.Path (not str).
       - MUST NOT fall back to any path outside the current repo when no override is provided.
       - MUST be stable under clean clone + python -I with src injected.
     """
-    if schema_root:
-        return str(Path(schema_root).resolve())
+    if schema_root is not None:
+        return Path(schema_root).resolve()
 
     for k in _ENV_KEYS:
         v = os.environ.get(k)
         if v and v.strip():
-            return str(Path(v).resolve())
+            return Path(v).resolve()
 
     repo = _repo_root_from_module()
-    vendor = (repo / "vendor" / "swe-schemas").resolve()
-    return str(vendor)
+    return (repo / "vendor" / "swe-schemas").resolve()
 
 __all__ = ["resolve_schema_root"]

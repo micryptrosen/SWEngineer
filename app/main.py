@@ -3141,46 +3141,28 @@ class MainWindow(QMainWindow):
 
 
 def main(argv: list[str] | None = None) -> int:
-
     _old_argv = None
     if argv is not None:
         try:
             _old_argv = list(sys.argv)
-        except Exception:
-            _old_argv = None
-        try:
             sys.argv = [sys.argv[0]] + list(argv)
         except Exception:
-            # If sys.argv is unavailable or argv is not iterable, keep current behavior.
+            # Keep current behavior if argv shim fails.
             pass
 
     try:
-    if _phase1d_try_flow_spine():
-        return 0
-    app = QApplication(sys.argv)
-
-
-    w = MainWindow()
-
-
-    w.show()
-
-
-    return app.exec()
-
+        if _phase1d_try_flow_spine():
+            return 0
+        app = QApplication(sys.argv)
+        w = MainWindow()
+        w.show()
+        return app.exec()
     finally:
         if _old_argv is not None:
             try:
                 sys.argv = _old_argv
             except Exception:
                 pass
-
-
-
-
-
-
-
 
 if __name__ == "__main__":
 

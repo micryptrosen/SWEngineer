@@ -448,3 +448,37 @@ def main(argv=None):  # noqa: F811
             return _phase5a_orig_main()
     return None
 # --- /PHASE5A_MAIN_WRAP_V1 ---------------------------------------------
+
+# =========================
+# Phase1F: Flow Spine Hooks
+# =========================
+# These are intentionally thin wrappers. Phase1G will bind them to the existing internal
+# planner/validator/executor surfaces already implemented in this module.
+
+def spine_build_plan(intent: dict) -> dict:
+    """
+    Build a plan from intent.
+    Phase1F scaffold: returns intent as a placeholder plan.
+    """
+    if not isinstance(intent, dict):
+        raise TypeError("intent must be a dict")
+    return {"kind": "plan", "intent": intent}
+
+def spine_validate_plan(plan: dict) -> dict:
+    """
+    Validate a plan and return a validated plan (or raise).
+    Phase1F scaffold: marks plan validated without deep checks.
+    """
+    if not isinstance(plan, dict):
+        raise TypeError("plan must be a dict")
+    return {"kind": "validated_plan", "plan": plan}
+
+def spine_execute_plan(validated_plan: dict) -> dict:
+    """
+    Execute a validated plan and return artifacts dict (evidence pointers, outputs, etc).
+    Phase1F scaffold: returns a minimal artifact set.
+    """
+    if not isinstance(validated_plan, dict):
+        raise TypeError("validated_plan must be a dict")
+    return {"kind": "artifacts", "note": "Phase1F scaffold (no execution yet)", "validated_plan": validated_plan}
+

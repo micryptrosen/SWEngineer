@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # --- Phase1D: optional flow spine wiring (no behavior change by default) ---
 
 
@@ -55,7 +57,6 @@ def _phase1d_try_flow_spine() -> bool:
 # File: C:\Dev\CCP\SWEngineer\app\main.py
 
 
-from __future__ import annotations
 
 
 from pathlib import Path as _Path
@@ -3166,6 +3167,7 @@ if __name__ == "__main__":
 
 
     raise SystemExit(main())
+
 
 
 

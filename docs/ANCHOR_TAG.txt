@@ -1,0 +1,4 @@
+ANCHOR_TAG=v0.2.9-phase5-step5it-publish-interlock_20260130_095545
+ANCHOR_HEAD=e24447ce5afa8c047273bce79f9412dacf67a78e
+ROOT=C:\Dev\CCP\SWEngineer
+BRANCH=work-flow-reorg-from-anchor

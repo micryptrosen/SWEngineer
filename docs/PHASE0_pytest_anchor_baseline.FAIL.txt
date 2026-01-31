@@ -1,0 +1,49 @@
+.....................FF...............                                   [100%]
+================================== FAILURES ===================================
+___________________ test_phase4_step4a_schema_coverage_gate ___________________
+
+    def test_phase4_step4a_schema_coverage_gate():
+        contracts = _enumerate_contract_ids_static()
+>       assert contracts, "no contract ids found in app/ or swe_runner/ (coverage gate meaningless)"
+E       AssertionError: no contract ids found in app/ or swe_runner/ (coverage gate meaningless)
+E       assert []
+
+tests\test_phase4_step4a_schema_coverage_gate.py:78: AssertionError
+________________ test_phase5_step5a_contract_id_normalization _________________
+
+    def test_phase5_step5a_contract_id_normalization():
+        artifacts = _resolve_latest_e2e_artifacts()
+    
+        failures: list[str] = []
+    
+        for p in artifacts:
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception as e:
+                failures.append(f"{p}: invalid json ({e})")
+                continue
+    
+            has_contract_id = isinstance(data.get("contract_id"), str) and bool(data.get("contract_id"))
+    
+            alt_present = [k for k in ALT_KEYS if k in data]
+    
+            if not has_contract_id:
+                failures.append(f"{p}: missing required contract_id")
+    
+            if alt_present and not has_contract_id:
+                failures.append(f"{p}: uses alternate keys {alt_present} without contract_id")
+    
+>       assert not failures, "CONTRACT_ID_NORMALIZATION_FAILURES:\n" + "\n".join(f" - {f}" for f in failures)
+E       AssertionError: CONTRACT_ID_NORMALIZATION_FAILURES:
+E          - C:\Dev\CCP\SWEngineer\_evidence\phase_2f\b2b_runtime_bootstrap_evidence_5ce0434_e57fffb51e24247a.json: missing required contract_id
+E          - C:\Dev\CCP\SWEngineer\_evidence\phase_3\phase3_step3b_entrypoint_probe_b1cabd4.json: missing required contract_id
+E          - C:\Dev\CCP\SWEngineer\_evidence\phase_3\phase3_step3b_entrypoint_probe_SAFE_95fd031.json: missing required contract_id
+E          - C:\Dev\CCP\SWEngineer\_evidence\phase_3\phase3_step3b_runtime_probe_b1cabd4.json: missing required contract_id
+E          - C:\Dev\CCP\SWEngineer\_evidence\phase_3\phase3_step3b_runtime_probe_SAFE_b1cabd4.json: missing required contract_id
+E       assert not ['C:\\Dev\\CCP\\SWEngineer\\_evidence\\phase_2f\\b2b_runtime_bootstrap_evidence_5ce0434_e57fffb51e24247a.json: missing...Dev\\CCP\\SWEngineer\\_evidence\\phase_3\\phase3_step3b_runtime_probe_SAFE_b1cabd4.json: missing required contract_id']
+
+tests\test_phase5_step5a_contract_id_normalization.py:76: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_phase4_step4a_schema_coverage_gate.py::test_phase4_step4a_schema_coverage_gate
+FAILED tests/test_phase5_step5a_contract_id_normalization.py::test_phase5_step5a_contract_id_normalization
+

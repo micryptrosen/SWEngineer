@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 """
 swe_bootstrap
 Phase 3 contract:
@@ -40,7 +42,45 @@ def _find_repo_root(start: Path) -> Path:
         cur = parent
     # Fallback: assume typical layout (repo/src/...)
     return start.resolve().parents[1]
+def _purge_shadow_schema_env(repo_root):
+    """
+    Clean-clone determinism:
+    If a globally-set schema root env var points OUTSIDE this repo, ignore it.
+    This prevents shadow binding to a different working copy (e.g., C:\\Dev\\CCP\\SWEngineer).
+    """
+    try:
+        from pathlib import Path
+    except Exception:
+        return
 
+    rr = Path(repo_root).resolve()
+    keys = [
+        "SWE_SCHEMA_ROOT",
+        "SWE_SCHEMAS_ROOT",
+        "SCHEMA_ROOT",
+        "SWENGINEER_SCHEMA_ROOT",
+    ]
+
+    for k in keys:
+        v = os.environ.get(k)
+        if not v:
+            continue
+        try:
+            cand = Path(v).expanduser().resolve()
+        except Exception:
+            # If it can't resolve, drop it (non-deterministic)
+            os.environ.pop(k, None)
+            continue
+
+        # Allow only schema roots that are inside THIS repo
+        try:
+            inside = cand.is_relative_to(rr)
+        except Exception:
+            # Py<3.9 fallback (shouldn't happen on 3.12, but keep deterministic)
+            inside = str(cand).lower().startswith(str(rr).lower())
+
+        if not inside:
+            os.environ.pop(k, None)
 
 def apply() -> None:
     """
@@ -60,3 +100,4 @@ def apply() -> None:
     _ins(repo / "src")
     _ins(repo / "app")
     _ins(repo / "vendor" / "swe-schemas")
+

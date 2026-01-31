@@ -10,12 +10,17 @@ def _repo_root() -> Path:
 
 
 def _venv_python(repo: Path) -> Path:
-    # Windows venv layout (this repo is Windows-first), but keep a POSIX fallback.
-    win = repo / ".venv" / "Scripts" / "python.exe"
-    if win.exists():
-        return win
-    posix = repo / ".venv" / "bin" / "python"
-    return posix
+    """
+    Cross-platform venv python location.
+    Windows: .venv\\Scripts\\python.exe
+    POSIX:   .venv/bin/python
+    """
+    if (repo / ".venv" / "Scripts" / "python.exe").exists():
+        return (repo / ".venv" / "Scripts" / "python.exe")
+    if (repo / ".venv" / "bin" / "python").exists():
+        return (repo / ".venv" / "bin" / "python")
+    # Fallback: allow system python, but tests should provision .venv for isolation invariants.
+    return (repo / ".venv" / "Scripts" / "python.exe")
 
 
 def test_isolated_import_invariant_I_bootstrap_validator_jsonschema() -> None:
@@ -81,3 +86,4 @@ print("ISOLATED_IMPORT_INVARIANT_STEP3J=GREEN")
         raise AssertionError(msg)
 
     assert "ISOLATED_IMPORT_INVARIANT_STEP3J=GREEN" in r.stdout
+

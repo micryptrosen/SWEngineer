@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   windows-pytest:
     runs-on: windows-latest
@@ -11,8 +14,10 @@ jobs:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
+          submodules: recursive
+          # Required: private submodules (vendor/swe-fixtures, vendor/swe-schemas)
+          token: ${{ secrets.SWENG_SUBMODULE_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -20,19 +25,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
-          pip install -e .
+          pip install -e . --no-deps
+          python -m pip install pytest
 
       - name: Pytest
-        shell: pwsh
         run: |
           python -m pytest -q
 
-      - name: Publish gate harness (tag intent) + CI pack pointer
-        shell: pwsh
+      - name: Publish (gated) CI harness
         env:
           SWENG_PUBLISH_SKIP_PYTEST: "1"
           SWENG_CI_PACK_SKIP_PYTEST: "1"

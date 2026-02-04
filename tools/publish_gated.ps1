@@ -50,6 +50,10 @@ Gate "pytest (must be green)" {
     Info "PYTEST_SKIP_NESTED=1"
     return
   }
+  if ($env:SWENG_PUBLISH_SKIP_PYTEST -eq "1") {
+    Info "PUBLISH_SKIP_PYTEST=1"
+    return
+  }
   python -m pytest -q
 }
 

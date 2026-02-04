@@ -22,35 +22,30 @@ $repo = RepoRoot
 Set-Location -LiteralPath $repo
 
 $pub = Join-Path $repo "tools\publish_gated.ps1"
-$ci  = Join-Path $repo "tools\ci_pack.ps1"
-
 if (-not (Test-Path -LiteralPath $pub)) { Fail ("FAILURE DETECTED: missing publish gate: " + $pub) 4 }
-if (-not (Test-Path -LiteralPath $ci))  { Fail ("FAILURE DETECTED: missing ci_pack: " + $ci) 4 }
 
-# 1) Run canonical publish gate first (authoritative)
-& powershell -NoProfile -ExecutionPolicy Bypass -File $pub -Intent $Intent
+# Thin wrapper:
+# - publish_gated.ps1 is authoritative and emits PUBLISH_CI_PACK_DIR on rc=0.
+# - if publish gate refuses (rc!=0), propagate rc and emit nothing else.
+# - ensure no nested pytest re-entry by default when called under pytest.
+if ($env:PYTEST_CURRENT_TEST) { $env:SWENG_PUBLISH_SKIP_PYTEST = "1" }
+
+$outLines = @()
+& powershell -NoProfile -ExecutionPolicy Bypass -File $pub -Intent $Intent 2>&1 | ForEach-Object {
+  $line = [string]$_
+  $outLines += $line
+  Write-Host $line
+}
 $rc = $LASTEXITCODE
 if ($rc -ne 0) { exit $rc }
 
-# 2) Only if publish gate passed, run CI pack and emit pointer.
-# Prevent nested pytest re-entry (ci_pack may run pytest unless explicitly skipped).
-$env:SWENG_CI_PACK_SKIP_PYTEST = "1"
-
-$txt = (& powershell -NoProfile -ExecutionPolicy Bypass -File $ci 2>&1 | Out-String)
-$rc2 = $LASTEXITCODE
-if ($rc2 -ne 0) {
-  # Emit captured output for diagnostics while preserving rc.
-  if ($txt) { Write-Host $txt }
-  exit $rc2
+# On success: confirm pointer is present and surface it once (canonical line already printed).
+$ptr = $null
+foreach ($l in $outLines) {
+  if ($l -match '^PUBLISH_CI_PACK_DIR=(.+)$') { $ptr = $Matches[1].Trim(); break }
 }
+if ([string]::IsNullOrWhiteSpace($ptr)) { Fail "FAILURE DETECTED: missing PUBLISH_CI_PACK_DIR in publish_gated output" 4 }
 
-# Keep output visible (useful for humans / logs) while still parsing it.
-if ($txt) { Write-Host $txt }
-
-$m = [regex]::Match($txt, 'CI_PACK_EVIDENCE_DIR=(.+)\r?$', [System.Text.RegularExpressions.RegexOptions]::Multiline)
-if (-not $m.Success) { Fail "FAILURE DETECTED: CI_PACK_EVIDENCE_DIR not found in ci_pack output" 4 }
-
-$ciDir = $m.Groups[1].Value.Trim()
-Info ("PUBLISH_CI_PACK_DIR=" + $ciDir)
+Info ("PUBLISH_CI_PACK_DIR=" + $ptr)
 exit 0
 

@@ -46,6 +46,10 @@ Gate "preflight: git clean working tree (enforced)" {
 }
 
 Gate "pytest (must be green)" {
+  if ($env:PYTEST_CURRENT_TEST) {
+    Info "PYTEST_SKIP_NESTED=1"
+    return
+  }
   python -m pytest -q
 }
 
@@ -85,7 +89,6 @@ Gate "intent: explicit publish intent" {
 }
 
 Gate "ci-pack evidence (post-success)" {
-  # publish_gated already ran pytest; prevent nested pytest hang under pytest runners
   $env:SWENG_CI_PACK_SKIP_PYTEST = "1"
 
   $ciPackScript = Join-Path $repo "tools\ci_pack.ps1"
@@ -106,13 +109,8 @@ Gate "ci-pack evidence (post-success)" {
   }
   if ([string]::IsNullOrWhiteSpace($ciEvidence)) { Fail "FAILURE DETECTED: CI_PACK_EVIDENCE_DIR missing from ci_pack output" 4 }
 
-  # Canonical pointer emitted by publish gate after success
   Info ("PUBLISH_CI_PACK_DIR=" + $ciEvidence)
 }
-
-# NOTE: This script is a gate-only harness.
-# It does NOT perform tagging or publishing actions.
-# Tagging/publishing must be performed by a separate controlled flow once gates are GREEN.
 
 Info "PUBLISH_GATED=GREEN"
 exit 0

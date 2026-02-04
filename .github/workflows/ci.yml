@@ -4,37 +4,46 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
   windows-pytest:
     runs-on: windows-latest
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout (no submodules)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
-          # Required: private submodules (vendor/swe-fixtures, vendor/swe-schemas)
-          token: ${{ secrets.SWENG_SUBMODULE_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e . --no-deps
-          python -m pip install pytest
+      - name: Install pytest
+        run: python -m pip install -U pip pytest
 
-      - name: Pytest
+      - name: Configure auth + fetch submodules
+        shell: pwsh
+        env:
+          SWENG_SUBMODULE_TOKEN: ${{ secrets.SWENG_SUBMODULE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python -m pytest -q
+          $tok = $env:SWENG_SUBMODULE_TOKEN
+          if ([string]::IsNullOrWhiteSpace($tok)) { $tok = $env:GITHUB_TOKEN }
 
-      - name: Publish (gated) CI harness
+          if ([string]::IsNullOrWhiteSpace($tok)) {
+            throw "FAILURE DETECTED: no token available for submodule access (set repo secret SWENG_SUBMODULE_TOKEN)"
+          }
+
+          git config --global "http.https://github.com/.extraheader" ("AUTHORIZATION: basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("x-access-token:" + $tok))))
+
+          git submodule sync --recursive
+          git submodule update --init --force --recursive
+
+      - name: Pytest (explicit)
+        run: python -m pytest -q
+
+      - name: Publish harness (CI)
+        shell: pwsh
         env:
           SWENG_PUBLISH_SKIP_PYTEST: "1"
           SWENG_CI_PACK_SKIP_PYTEST: "1"

@@ -1,24 +1,25 @@
+from __future__ import annotations
+
 """
-swe_runner package boundary (Phase 3 hardening).
+swe_runner package
 
 Contract:
-- swe_runner is bound to canonical schema-root resolution via swe_schemas
-- no local/forked schema root resolver is permitted
+- Must NOT cache schema root or bind resolver at import time.
+- Must resolve via canonical swe_schemas at call-time.
 """
 
-from __future__ import annotations
-import swe_schemas as swe_schemas
-
-# Canonical plumbing bind (do not remove)
-import swe_schemas as swe_schemas  # noqa: F401
+from pathlib import Path
+import swe_schemas
 
 
-def resolve_schema_root() -> str:
-    """Call-time schema root resolution (Phase 3 / Step 3M)."""
+def resolve_schema_root() -> Path:
+    """
+    Call-time binding to the canonical resolver.
+
+    IMPORTANT:
+    Do not alias/import the function directly:
+      from swe_schemas import resolve_schema_root
+    because monkeypatching swe_schemas.resolve_schema_root must be observable here.
+    """
     return swe_schemas.resolve_schema_root()
 
-
-__all__ = [
-    "resolve_schema_root",
-    "swe_schemas",
-]

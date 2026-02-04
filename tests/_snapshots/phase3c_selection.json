@@ -1,0 +1,37 @@
+{
+  "rules": {
+    "file_must_reference": [
+      "swe_schemas OR resolve_schema_root"
+    ],
+    "ordering": "lexicographic by rel path",
+    "pick": "first runner + first surface",
+    "runner_path_contains": "runner",
+    "surface_excludes_runner_module": true,
+    "surface_path_contains_any": [
+      "planner",
+      "plan",
+      "planning",
+      "validate",
+      "validator",
+      "validation",
+      "schema",
+      "schemas"
+    ]
+  },
+  "runner_mod": "swe_runner.__init__",
+  "runner_rel": "swe_runner/__init__.py",
+  "selection_kind": "phase3c-surface-selection",
+  "selection_version": 1,
+  "surface_mod": "swe_schemas.__init__",
+  "surface_rel": "swe_schemas/__init__.py",
+  "surface_tokens": [
+    "planner",
+    "plan",
+    "planning",
+    "validate",
+    "validator",
+    "validation",
+    "schema",
+    "schemas"
+  ]
+}

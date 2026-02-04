@@ -1,48 +1,119 @@
-# Publish-Gated (canonical)
+param(
+  [Parameter(Mandatory=$true)]
+  [ValidateSet("tag","publish")]
+  [string]$Intent
+)
+
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Gate([string]$name, [scriptblock]$body) {
-  Write-Host ("=== GATE: {0} ===" -f $name)
-  & $body
-  if ($LASTEXITCODE -ne 0) { throw ("FAILURE DETECTED: gate failed: {0}" -f $name) }
-  Write-Host ("{0}=GREEN" -f $name)
+function Fail([string]$Msg, [int]$Code = 4) {
+  Write-Host $Msg
+  exit $Code
 }
 
-Gate "publish interlock set" {
-  if ($env:SWENGINEER_ALLOW_PUBLISH -ne "1") {
-    throw "FAILURE DETECTED: publish interlock is set. Set SWENGINEER_ALLOW_PUBLISH=1 to proceed."
-  }
+function Info([string]$Msg) { Write-Host $Msg }
+
+function Gate {
+  param(
+    [Parameter(Mandatory=$true)][string]$Name,
+    [Parameter(Mandatory=$true)][scriptblock]$Body
+  )
+  Write-Host "`n=== GATE: $Name ==="
+  $global:LASTEXITCODE = 0
+  & $Body
+  if ($LASTEXITCODE -ne 0) { Fail ("FAILURE DETECTED: gate '" + $Name + "' rc=" + $LASTEXITCODE) 4 }
+  Write-Host ("GATE=GREEN NAME=" + $Name)
 }
 
-Gate "status clean (pre-publish)" {
-  $s = & git status --porcelain
-  if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: git status failed" }
-  if ($s) { throw ("FAILURE DETECTED: working tree not clean:`n" + $s) }
+function RepoRoot() {
+  $r = (& git rev-parse --show-toplevel 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $r) { Fail "FAILURE DETECTED: not a git repo (no toplevel)" 4 }
+  return $r
 }
 
-Gate "pytest -q (pre-publish)" {
+$repo = RepoRoot
+Set-Location -LiteralPath $repo
+
+$evidenceDir = Join-Path $repo "_evidence\publish"
+New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
+
+$parityJson = Join-Path $evidenceDir "parity_probe.json"
+
+Gate "preflight: git clean working tree (enforced)" {
+  $dirty = (& git status --porcelain)
+  if ($dirty) { Fail "FAILURE DETECTED: dirty working tree. publish gate requires clean tree." 4 }
+}
+
+Gate "pytest (must be green)" {
   python -m pytest -q
 }
 
-Gate "push branch + tag (already tagged)" {
-  # SAFETY: refuse tag-only publish (must have a commit reachable from branch tip)
-  $head = (& git rev-parse HEAD).Trim()
-  if (-not $head) { throw "FAILURE DETECTED: could not resolve HEAD" }
-
-  $tag = (& git describe --tags --exact-match).Trim()
-  if (-not $tag) { throw "FAILURE DETECTED: HEAD must be exactly at a tag for this publish gate" }
-
-  # Push current branch (must be on a branch)
-  $branch = (& git rev-parse --abbrev-ref HEAD).Trim()
-  if (-not $branch -or $branch -eq "HEAD") { throw "FAILURE DETECTED: detached HEAD; cannot push branch" }
-
-  git push origin $branch
-  if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: git push branch failed" }
-
-  git push origin $tag
-  if ($LASTEXITCODE -ne 0) { throw "FAILURE DETECTED: git push tag failed" }
-
-  Write-Host ("PUBLISHED_TAG=" + $tag)
-  Write-Host ("HEAD=" + $head)
-  Write-Host ("BRANCH=" + $branch)
+Gate "parity-probe evidence (required)" {
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo "tools\swengineer.ps1") parity-probe -Out $parityJson | Out-Null
+  $rc = $LASTEXITCODE
+  if ($rc -ne 0 -and $rc -ne 2) { Fail ("FAILURE DETECTED: parity-probe rc=" + $rc) 4 }
+  if (-not (Test-Path -LiteralPath $parityJson)) { Fail ("FAILURE DETECTED: parity-probe out missing: " + $parityJson) 4 }
+  if (-not (Test-Path -LiteralPath ($parityJson + ".sha256"))) { Fail ("FAILURE DETECTED: parity-probe sha256 missing: " + $parityJson + ".sha256") 4 }
 }
+
+Gate "parity-probe selection matches snapshot (if present)" {
+  $snap = Join-Path $repo "tests\_snapshots\phase3c_selection.json"
+  if (Test-Path -LiteralPath $snap) {
+    $snapObj = Get-Content -LiteralPath $snap -Raw | ConvertFrom-Json
+    $probeObj = Get-Content -LiteralPath $parityJson -Raw | ConvertFrom-Json
+
+    if ($null -eq $probeObj.selection) { Fail "FAILURE DETECTED: parity-probe selection block missing" 4 }
+
+    $runnerA = [string]$probeObj.selection.runner_mod
+    $surfaceA = [string]$probeObj.selection.surface_mod
+    $runnerE = [string]$snapObj.runner_mod
+    $surfaceE = [string]$snapObj.surface_mod
+
+    if ([string]::IsNullOrWhiteSpace($runnerA) -or [string]::IsNullOrWhiteSpace($surfaceA)) {
+      Fail "FAILURE DETECTED: parity-probe selection fields missing" 4
+    }
+
+    if ($runnerA -ne $runnerE) { Fail ("FAILURE DETECTED: runner selection drift: got=" + $runnerA + " expected=" + $runnerE) 4 }
+    if ($surfaceA -ne $surfaceE) { Fail ("FAILURE DETECTED: surface selection drift: got=" + $surfaceA + " expected=" + $surfaceE) 4 }
+  }
+}
+
+Gate "intent: explicit publish intent" {
+  if ($Intent -ne "tag" -and $Intent -ne "publish") { Fail "FAILURE DETECTED: invalid intent" 4 }
+  Info ("INTENT=" + $Intent)
+}
+
+Gate "ci-pack evidence (post-success)" {
+  # publish_gated already ran pytest; prevent nested pytest hang under pytest runners
+  $env:SWENG_CI_PACK_SKIP_PYTEST = "1"
+
+  $ciPackScript = Join-Path $repo "tools\ci_pack.ps1"
+  if (-not (Test-Path -LiteralPath $ciPackScript)) { Fail ("FAILURE DETECTED: ci_pack.ps1 missing: " + $ciPackScript) 4 }
+
+  $outLines = @()
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $ciPackScript 2>&1 | ForEach-Object {
+    $line = [string]$_
+    $outLines += $line
+    Write-Host $line
+  }
+  $rc = $LASTEXITCODE
+  if ($rc -ne 0) { Fail ("FAILURE DETECTED: ci_pack rc=" + $rc) 4 }
+
+  $ciEvidence = $null
+  foreach ($l in $outLines) {
+    if ($l -match '^CI_PACK_EVIDENCE_DIR=(.+)$') { $ciEvidence = $Matches[1].Trim(); break }
+  }
+  if ([string]::IsNullOrWhiteSpace($ciEvidence)) { Fail "FAILURE DETECTED: CI_PACK_EVIDENCE_DIR missing from ci_pack output" 4 }
+
+  # Canonical pointer emitted by publish gate after success
+  Info ("PUBLISH_CI_PACK_DIR=" + $ciEvidence)
+}
+
+# NOTE: This script is a gate-only harness.
+# It does NOT perform tagging or publishing actions.
+# Tagging/publishing must be performed by a separate controlled flow once gates are GREEN.
+
+Info "PUBLISH_GATED=GREEN"
+exit 0
+

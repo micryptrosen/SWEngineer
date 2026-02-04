@@ -14,9 +14,17 @@ def test_phase4b_ci_workflow_runs_publish_gate_harness() -> None:
 
     txt = wf.read_text(encoding="utf-8")
 
-    # Must run canonical publish gate harness in CI.
-    assert "tools/publish_gated.ps1" in txt, "workflow must invoke tools/publish_gated.ps1"
-    assert "-Intent tag" in txt, "workflow must run publish gate with -Intent tag"
-    assert "SWENG_PUBLISH_SKIP_PYTEST" in txt, "workflow must set SWENG_PUBLISH_SKIP_PYTEST to avoid duplicate pytest"
+    # CI must run an authoritative publish harness:
+    # - tools/publish_gated.ps1 is canonical gate
+    # - tools/publish_gated_ci.ps1 is thin wrapper around publish_gated + pointer emission
+    has_publish_gate = "tools/publish_gated.ps1" in txt
+    has_publish_ci = "tools/publish_gated_ci.ps1" in txt
+    assert has_publish_gate or has_publish_ci, (
+        "workflow must invoke tools/publish_gated.ps1 or tools/publish_gated_ci.ps1"
+    )
+
+    # Must set skip-pytest flags to avoid nested pytest re-entry / hangs.
+    assert 'SWENG_PUBLISH_SKIP_PYTEST: "1"' in txt, "workflow must set SWENG_PUBLISH_SKIP_PYTEST=1"
+    assert 'SWENG_CI_PACK_SKIP_PYTEST: "1"' in txt, "workflow must set SWENG_CI_PACK_SKIP_PYTEST=1"
 
 

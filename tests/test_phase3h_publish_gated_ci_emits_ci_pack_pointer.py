@@ -13,21 +13,31 @@ def test_phase3h_publish_gated_ci_emits_ci_pack_pointer_when_clean() -> None:
     tool = repo / "tools" / "publish_gated_ci.ps1"
     assert tool.exists(), f"missing wrapper: {tool}"
 
-    r = subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(tool),
-            "-Intent",
-            "tag",
-        ],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        r = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(tool),
+                "-Intent",
+                "tag",
+            ],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or "").strip()
+        err = (e.stderr or "").strip()
+        raise AssertionError(
+            "FAILURE DETECTED: publish_gated_ci subprocess timed out (60s)\n"
+            f"stdout={out}\n"
+            f"stderr={err}\n"
+        ) from e
 
     # If repo is dirty, publish gate will refuse with rc=4, and wrapper must propagate rc.
     assert r.returncode in (0, 4), f"unexpected rc={r.returncode}\nstdout={r.stdout}\nstderr={r.stderr}"

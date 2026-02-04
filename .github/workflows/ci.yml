@@ -27,11 +27,12 @@ jobs:
         run: |
           python -m pytest -q
 
-      - name: Publish gate harness (tag intent) + CI pack pointer
+      - name: Publish gated CI wrapper (tag intent) + CI pack pointer
         shell: pwsh
         env:
           SWENG_PUBLISH_SKIP_PYTEST: "1"
+          SWENG_CI_PACK_SKIP_PYTEST: "1"
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File "tools/publish_gated.ps1" -Intent tag
+          pwsh -NoProfile -ExecutionPolicy Bypass -File "tools/publish_gated_ci.ps1" -Intent tag
 
 

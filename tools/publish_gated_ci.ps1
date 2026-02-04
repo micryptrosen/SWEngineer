@@ -32,12 +32,21 @@ if (-not (Test-Path -LiteralPath $ci))  { Fail ("FAILURE DETECTED: missing ci_pa
 $rc = $LASTEXITCODE
 if ($rc -ne 0) { exit $rc }
 
-# 2) Only if publish gate passed, run CI pack and emit pointer
-$lines = & powershell -NoProfile -ExecutionPolicy Bypass -File $ci
-$rc2 = $LASTEXITCODE
-if ($rc2 -ne 0) { exit $rc2 }
+# 2) Only if publish gate passed, run CI pack and emit pointer.
+# Prevent nested pytest re-entry (ci_pack may run pytest unless explicitly skipped).
+$env:SWENG_CI_PACK_SKIP_PYTEST = "1"
 
-$txt = ($lines -join "`n")
+$txt = (& powershell -NoProfile -ExecutionPolicy Bypass -File $ci 2>&1 | Out-String)
+$rc2 = $LASTEXITCODE
+if ($rc2 -ne 0) {
+  # Emit captured output for diagnostics while preserving rc.
+  if ($txt) { Write-Host $txt }
+  exit $rc2
+}
+
+# Keep output visible (useful for humans / logs) while still parsing it.
+if ($txt) { Write-Host $txt }
+
 $m = [regex]::Match($txt, 'CI_PACK_EVIDENCE_DIR=(.+)\r?$', [System.Text.RegularExpressions.RegexOptions]::Multiline)
 if (-not $m.Success) { Fail "FAILURE DETECTED: CI_PACK_EVIDENCE_DIR not found in ci_pack output" 4 }
 
